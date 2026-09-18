@@ -73,57 +73,50 @@ void main() {
     },
   );
 
-  test(
-    'fb-config appends --web-content-hash to existing build command without overwriting other config',
-    () async {
-      await d
-          .file(
-            'firebase.json',
-            jsonEncode(<String, Object?>{
-              'hosting': <String, Object?>{
-                'public': 'custom/dir',
-                'predeploy': <String>[
-                  'npm run build',
-                  'flutter build web --release',
-                ],
-                'rewrites': <Object>[
-                  <String, String>{
-                    'source': '**',
-                    'destination': '/index.html',
-                  },
-                ],
-              },
-            }),
-          )
-          .create();
+  test('fb-config appends --web-content-hash to existing build command without overwriting other config', () async {
+    await d
+        .file(
+          'firebase.json',
+          jsonEncode(<String, Object?>{
+            'hosting': <String, Object?>{
+              'public': 'custom/dir',
+              'predeploy': <String>[
+                'npm run build',
+                'flutter build web --release',
+              ],
+              'rewrites': <Object>[
+                <String, String>{'source': '**', 'destination': '/index.html'},
+              ],
+            },
+          }),
+        )
+        .create();
 
-      final String targetFile = '${d.sandbox}/firebase.json';
-      final TestProcess process = await TestProcess.start('dart', <String>[
-        'run',
-        'bin/flutter_web_cache_check.dart',
-        'fb-config',
-        '--file',
-        targetFile,
-      ]);
+    final String targetFile = '${d.sandbox}/firebase.json';
+    final TestProcess process = await TestProcess.start('dart', <String>[
+      'run',
+      'bin/flutter_web_cache_check.dart',
+      'fb-config',
+      '--file',
+      targetFile,
+    ]);
 
-      await expectLater(
-        process.stdout,
-        emitsThrough('✅ Successfully updated $targetFile with caching rules.'),
-      );
-      await process.shouldExit(0);
+    await expectLater(
+      process.stdout,
+      emitsThrough('✅ Successfully updated $targetFile with caching rules.'),
+    );
+    await process.shouldExit(0);
 
-      final Map<String, Object?> config =
-          jsonDecode(File(targetFile).readAsStringSync())
-              as Map<String, Object?>;
-      final Map<String, Object?> hosting =
-          config['hosting']! as Map<String, Object?>;
+    final Map<String, Object?> config =
+        jsonDecode(File(targetFile).readAsStringSync()) as Map<String, Object?>;
+    final Map<String, Object?> hosting =
+        config['hosting']! as Map<String, Object?>;
 
-      expect(hosting['public'], 'custom/dir'); // Preserved
-      expect(hosting['rewrites'], isNotEmpty); // Preserved
+    expect(hosting['public'], 'custom/dir'); // Preserved
+    expect(hosting['rewrites'], isNotEmpty); // Preserved
 
-      final List<Object?> predeploy = hosting['predeploy']! as List<Object?>;
-      expect(predeploy[0], 'npm run build');
-      expect(predeploy[1], 'flutter build web --release --web-content-hash');
-    },
-  );
+    final List<Object?> predeploy = hosting['predeploy']! as List<Object?>;
+    expect(predeploy[0], 'npm run build');
+    expect(predeploy[1], 'flutter build web --release --web-content-hash');
+  });
 }
