@@ -88,7 +88,7 @@ class UrlChecker {
       final http.Response resp = await http.head(uri);
       if (resp.statusCode == 404 && label == 'index.html') {
         // Fallback to GET baseUri if index.html is rewritten
-        return _checkNoCacheHeader(uri.resolve('./'), '/', verbose);
+        return await _checkNoCacheHeader(uri.resolve('./'), '/', verbose);
       }
       if (resp.statusCode >= 400) {
         print('❌ [FAIL] $label returned HTTP ${resp.statusCode}');

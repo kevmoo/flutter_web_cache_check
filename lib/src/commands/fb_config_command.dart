@@ -22,7 +22,8 @@ class FbConfigCommand extends Command<void> {
       'add-predeploy',
       abbr: 'p',
       defaultsTo: true,
-      help: 'Add or update "flutter build web --web-content-hash" in hosting.predeploy.',
+      help:
+          'Add or update "flutter build web --web-content-hash" in hosting.predeploy.',
     );
   }
 

@@ -13,7 +13,8 @@ class FirebaseConfig {
       ],
     },
     <String, Object>{
-      'source': '**/{index.html,flutter_bootstrap.js,flutter.js,flutter_service_worker.js,manifest.json,version.json}',
+      'source':
+          '**/{index.html,flutter_bootstrap.js,flutter.js,flutter_service_worker.js,manifest.json,version.json}',
       'headers': <Map<String, String>>[
         <String, String>{
           'key': 'Cache-Control',
@@ -85,8 +86,9 @@ class FirebaseConfig {
       throw FormatException('Unexpected type for "hosting" in $filePath.');
     }
 
-    final String updatedJson = const JsonEncoder.withIndent('  ')
-        .convert(config);
+    final String updatedJson = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(config);
     file.writeAsStringSync('$updatedJson\n');
     print('✅ Successfully updated $filePath with caching rules.');
   }
