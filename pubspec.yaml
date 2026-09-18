@@ -4,7 +4,7 @@ version: 0.0.1
 # repository: https://github.com/my_org/my_repo
 
 environment:
-  sdk: ^3.14.955163973-edge+google3-v2
+  sdk: ^3.13.0
 
 # Add regular dependencies here.
 dependencies:
