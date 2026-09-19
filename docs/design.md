@@ -1,121 +1,132 @@
 # Flutter Web Cache Check (`flutter_web_cache_check`) Design Document
 
-## 1. Overview
+## 1. Overview & Two-Layer Architecture
 
-`flutter_web_cache_check` is a specialized Dart CLI tool designed to solve web caching challenges for Flutter web applications, specifically aligning with the `--web-content-hash` compiler option introduced in `flutter/flutter#190153`.
+`flutter_web_cache_check` is a Dart CLI and library designed to audit and
+configure HTTP caching for Flutter Web applications compiled with
+`--web-content-hash` (`flutter/flutter#190153`).
 
-The tool serves two core purposes:
+The tool is structured around a **two-layer architecture**:
 
-1. **Configure (`fb-config`)**: Automated modification and auditing of Firebase Hosting configuration files (`firebase.json`) to ensure long-term caching of immutable hashed entrypoints, zero-caching of bootloader manifests, and automated predeploy compilation.
-2. **Verify (`check`)**: Live remote verification of hosted Flutter web applications to validate that HTTP response headers and bootstrap configurations match expected caching behavior.
+1. **Layer 1 — Universal HTTP & Flutter Web Runtime Checks (`UrlChecker`)**:
+   Host-agnostic RFC 9111 `Cache-Control` parsing (`CacheDirectives`), shared
+   CDN TTL precedence (`CDN-Cache-Control` -> `Surrogate-Control` -> `s-maxage`
+   -> `max-age`), hashed vs. unhashed asset graph verification, `.wasm`/`.mjs`
+   MIME enforcement, Brotli/Gzip compression and `Vary: Accept-Encoding`
+   validation, conditional `304 Not Modified` revalidation, SPA catch-all
+   rewrite poisoning probes, and `404` negative-cache TTL probes.
+2. **Layer 2 — Firebase Hosting Adapter (`HostPlatform.firebase` &
+   `fb-config`)**:
+   Auto-detects Firebase Hosting via `Vary: x-fh-requested-host`, warns when
+   `no-cache`/`no-store`/`private` triggers Fastly VCL `return(pass)` (`F-12`),
+   and configures `firebase.json` with a 5-rule `last-match-wins` header stack
+   and guarded SPA rewrites.
 
 ---
 
-## 2. Subcommand: `fb-config`
+## 2. Subcommand: `fb-config` (Firebase Hosting Adapter)
 
 ### 2.1 Objective
 
-Automatically inject or audit caching header rules and build scripts in an existing Flutter web project's Firebase Hosting configuration (`firebase.json`), ensuring optimal cache hit ratios without serving stale application logic.
+Automatically inject, migrate, and guard caching headers, SPA rewrites, and
+predeploy build flags inside `firebase.json` so that:
 
-### 2.2 Target Rules (`firebase.json` Specification)
+- Fastly CDN edges cache `index.html` and `flutter_bootstrap.js` with `s-maxage`
+  / `max-age=0, must-revalidate` (enabling edge `304 Not Modified` revalidation
+  instead of bypassing Fastly via `return(pass)`).
+- Firebase Hosting's implicit `max-age=3600` fallback is overridden for all
+  unhashed files (`**`) and `404.html`.
+- Content-hashed entrypoints (`main.dart.*.{js,wasm,mjs}`) and hashed assets
+  under `assets/**` receive `public, max-age=31536000, immutable`.
+- Unhashed manifest files under `assets/` (`AssetManifest.bin.json`,
+  `FontManifest.json`, `NOTICES`, etc.) override `assets/**` back to
+  `max-age=0, must-revalidate`.
 
-When targeting Firebase Hosting, the `fb-config` command modifies the `hosting.headers` and `hosting.predeploy` sections inside `firebase.json`.
+### 2.2 Canonical 5-Rule `last-match-wins` Header Stack (`firebase.json`)
 
-#### Rule 1: Immutable Hashed Entrypoints
+Firebase Hosting evaluates `hosting.headers` in declaration order where **the
+last matching rule wins** for any duplicate header key (`Cache-Control`).
+`fb-config` writes the following 5-rule ordered stack:
 
-Compiled binaries generated with `--web-content-hash` contain an 8-character SHA-256 digest in their filename (e.g., `main.dart.10579154.js`). These files are immutable and must be cached aggressively.
+| Order | Glob `source` | `Cache-Control` Value | Rationale |
+| :--- | :--- | :--- | :--- |
+| 1 | `**` | `max-age=0, must-revalidate` | Overrides Firebase's 3600s default on `index.html`, `flutter_bootstrap.js`, `version.json`, and deferred `.part.js` chunks while keeping Fastly edge 304s active. |
+| 2 | `**/main.dart.*.{js,wasm,mjs}` | `public, max-age=31536000, immutable` | Caches content-hashed Dart2JS / Dart2Wasm bundles for 1 year without reload revalidation. |
+| 3 | `assets/**` | `public, max-age=31536000, immutable` | Caches hashed asset files under `assets/` for 1 year. |
+| 4 | `assets/@(AssetManifest.json\|AssetManifest.bin\|AssetManifest.bin.json\|FontManifest.json\|NOTICES)` | `max-age=0, must-revalidate` | Overrides Rule 3 (`assets/**`) so unhashed Flutter manifest files revalidate on every deploy. |
+| 5 | `404.html` | `max-age=0, must-revalidate` | Prevents CDN edges or browsers from caching `404 Not Found` responses during non-atomic deploy rollouts. |
 
-- **Glob Matcher**: `"**/main.dart.*.{js,wasm,mjs}"`
-- **Injected Header**:
-  - `Key`: `Cache-Control`
-  - `Value`: `public, max-age=31536000, immutable`
+### 2.3 Guarded SPA Rewrite (`!/@(assets|canvaskit|icons|main.dart.*)/**`)
 
-#### Rule 2: Un-hashed Bootloaders, Manifests, & Deferred Modules
+An unguarded SPA catch-all rewrite
+(`"source": "**", "destination": "/index.html"`) causes missing hashed bundles
+or assets to return `200 OK` with `text/html` (`index.html`) instead of
+`404 Not Found`, poisoning immutable caches (`F-05`).
 
-Bootloader files, metadata manifests, and deferred loading part files do not include content hashes in their filenames in Option 1 (Core MVP). Because of current limitations, deferred JS/WASM part files (`*.part.js`, `*.part.wasm`, `_module*.wasm`) lack content hashes and therefore **must not be cached long-term**. All un-hashed files must be revalidated on every request so browsers immediately discover new application deployments without stale chunk crashes.
+When `fb-config` encounters a rewrite with `"source": "**"` or `"**/*"`
+targeting `/index.html`, it automatically rewrites `"source"` to:
 
-- **Glob Matchers**:
-  - `"**/{index.html,flutter_bootstrap.js,flutter.js,flutter_service_worker.js,manifest.json,version.json}"`
-  - `"**/*.part.{js,wasm}"`
-  - `"**/_module*.wasm"`
-- **Injected Header**:
-  - `Key`: `Cache-Control`
-  - `Value`: `no-cache, no-store, must-revalidate`
+```json
+{
+  "source": "!/@(assets|canvaskit|icons|main.dart.*)/**",
+  "destination": "/index.html"
+}
+```
 
-#### Rule 3: Build / Predeploy Command Automation (Optional)
+### 2.4 Legacy Rule Migration & Predeploy Automation
 
-When invoked with `--add-predeploy` (or by default when configuring hosting), `fb-config` inspects and wires up the `predeploy` array under `hosting` in `firebase.json` to ensure automated compilation with content hashing prior to deployment.
-
-- **Target Rule**: Ensures `"flutter build web --web-content-hash"` is present in the `predeploy` array.
-- **Smart Update**: If an existing `"flutter build web"` command is found without the flag, it is automatically appended with `--web-content-hash`. If no web build command exists, `"flutter build web --web-content-hash"` is added to the array.
-
-### 2.3 Execution Behavior
-
-- Reads local `firebase.json` in the working directory (or path provided via `--file`).
-- If `hosting` or `hosting.headers` does not exist, scaffolds the appropriate JSON array.
-- Merges caching rules without overwriting or destroying unrelated user configurations (e.g., custom rewrites, clean URLs, or CORS headers).
-- Optionally updates `hosting.predeploy` to include `--web-content-hash` when requested via `--add-predeploy`.
-- Outputs a summary of added or modified rules to standard output.
+- **Legacy Migration**: Any legacy v0.1.0 header rules (such as
+  `**/{index.html,flutter_bootstrap.js,...}` with `no-cache, no-store`) are
+  replaced in-place by the canonical 5-rule stack while preserving user-defined
+  custom headers (e.g. `Cross-Origin-Opener-Policy`,
+  `Access-Control-Allow-Origin`).
+- **Predeploy Hook (`--add-predeploy`)**: Ensures
+  `"flutter build web --web-content-hash"` is configured in `hosting.predeploy`.
 
 ---
 
-## 3. Subcommand: `check`
+## 3. Subcommand: `check` (Universal & Platform-Aware Auditor)
 
-### 3.1 Objective
-
-Perform an end-to-end HTTP audit against a live deployed web URL (e.g., `https://my-app.web.app` or `http://localhost:5000`) to confirm that caching headers are functioning correctly on the live infrastructure.
-
-### 3.2 Audit Workflow
+### 3.1 Audit Workflow
 
 ```mermaid
 flowchart TD
     A[Start: Input Target URL] --> B[Fetch /index.html & /flutter_bootstrap.js]
-    B --> C{Check Cache-Control Headers}
-    C -- Stale/Long Max-Age --> D[FAIL: Bootloader Cached]
-    C -- No-Cache / Revalidate --> E[PASS: Bootloader Revalidates]
-    E --> F[Parse _flutter.buildConfig in flutter_bootstrap.js]
-    F --> G[Extract mainJsPath, mainWasmPath, jsSupportRuntimePath]
-    G --> H{Verify Filenames contain SHA-256 Hash}
-    H -- No Hash Found --> I[WARN: --web-content-hash not enabled]
-    H -- Hash Found --> J[Fetch Discovered Entrypoint URLs]
-    J --> K{Check Entrypoint Cache-Control Headers}
-    K -- Max-Age 1 Year + Immutable --> L[PASS: Entrypoint Aggressively Cached]
-    K -- Short Max-Age / Missing --> M[FAIL: Entrypoint Not Cached Properly]
+    B --> C[Parse RFC 9111 CacheDirectives & Shared CDN TTLs]
+    C --> D[Conditional GET on /index.html with If-None-Match]
+    D --> E[Guard /flutter_bootstrap.js against 200 text/html SPA fallback]
+    E --> F[Extract Entrypoints & Manifests from _flutter.buildConfig]
+    F --> G[Probe Hashed/Unhashed Entrypoints & AssetManifest.bin.json]
+    G --> H[Verify .wasm / .mjs MIME Types & br/gzip Compression + Vary]
+    H --> I[Probe Missing Hashed Assets for F-05 SPA Rewrite & F-06 404 TTL]
 ```
 
-### 3.3 Detailed Verification Steps
+### 3.2 Rule Catalog (`CheckFinding` IDs)
 
-1. **Bootloader Header Inspection**:
-   - Issues `GET` or `HEAD` requests to `/index.html` and `/flutter_bootstrap.js`.
-   - Asserts that `Cache-Control` specifies `no-cache`, `no-store`, `max-age=0`, or `must-revalidate`.
-2. **Manifest Parsing**:
-   - Reads the body of `/flutter_bootstrap.js`.
-   - Extracts the `_flutter.buildConfig` JSON object.
-   - Identifies active compilation targets and their corresponding filenames (`mainJsPath`, `mainWasmPath`, `jsSupportRuntimePath`).
-3. **Hash Verification**:
-   - Validates that extracted filenames match the regex pattern `r'^main\.dart\.[a-f0-9]{8}\.(js|wasm|mjs)$'`.
-4. **Immutable Asset Header Inspection**:
-   - Issues `HEAD` requests to the discovered entrypoint URLs (e.g., `/main.dart.10579154.js`).
-   - Asserts that `Cache-Control` contains `max-age=31536000` (or similar long duration) and `immutable`.
-5. **Deferred Module Header Inspection**:
-   - Probes or inspects discovered deferred loading part files (e.g., `main.dart.js_1.part.js`, `_module1.wasm`).
-   - Verifies that they are served with `no-cache`, `no-store`, `max-age=0`, or `must-revalidate`, confirming they are not cached long-term due to current Phase 1 limitations.
-
-### 3.4 Diagnostic Report Output
-
-Prints a clear tabular or bulleted CLI report:
-
-- ✅ `[PASS]` `/flutter_bootstrap.js` -> `Cache-Control: no-cache`
-- ✅ `[PASS]` Entrypoint hash detected: `main.dart.10579154.js`
-- ✅ `[PASS]` `/main.dart.10579154.js` -> `Cache-Control: public, max-age=31536000, immutable`
-- ✅ `[PASS]` Deferred part `/main.dart.js_1.part.js` -> `Cache-Control: no-cache`
-- ❌ `[FAIL]` (if any headers violate revalidation or immutability rules, explaining the exact risk to the user).
+| Rule ID | Category | Severity | Verification Condition |
+| :--- | :--- | :--- | :--- |
+| `F-01` | Root HTML (`index.html` / `/`) | `fail` / `ok` | Browser `max-age <= 0` (or `no-cache`/`no-store`), not `immutable`, and shared CDN TTL (`CDN-Cache-Control` / `Surrogate-Control` / `s-maxage`) `<= 0`. |
+| `F-02` | Bootloader (`flutter_bootstrap.js`) | `fail` / `ok` | Must revalidate (`max-age=0, must-revalidate` or `no-cache`) with shared CDN TTL `<= 0`. |
+| `F-03` | App Bundles (`mainJsPath`, `mainWasmPath`, `jsSupportRuntimePath`) | `fail` / `warn` / `ok` | Hashed bundles require `max-age >= 31536000`, `immutable`, and not `private`/`no-cache`/`no-store` (`warn` if missing `immutable`). Unhashed bundles must revalidate (`max-age <= 0`). |
+| `F-04` | Hashed Manifests (`assetManifest`, `fontManifest`) | `fail` / `warn` / `ok` | When `buildConfig` specifies content-hashed manifest paths, enforces `max-age >= 31536000, immutable`. |
+| `F-05` | SPA Catch-All Rewrite Poisoning | `fail` / `ok` | Probes `/main.dart.00000000.js` and `/assets/__cache_check_missing__.00000000.png` (plus guards `/flutter_bootstrap.js` and manifest probes). Fails if any static asset probe returns `200 OK` or `text/html`. |
+| `F-06` | Negative-Cache (`404`) TTL | `fail` / `warn` / `ok` | Inspects `404` responses on missing hashed paths. Fails if `immutable` or effective TTL `> 60s`; warns if `0 < TTL <= 60s`. |
+| `F-07` | Unhashed Manifests (`assets/AssetManifest.bin.json`) | `fail` / `ok` | Probes `assets/AssetManifest.bin.json` when unhashed and fails if `max-age > 0` or missing explicit revalidation. |
+| `F-12` | Firebase Fastly `return(pass)` | `warn` | Emitted when `HostPlatform.firebase` is detected (`Vary: x-fh-requested-host`) and root/bootloader uses `no-cache`, `no-store`, or `private` instead of `max-age=0, must-revalidate`. |
+| `M-01` | WebAssembly MIME Type | `fail` / `ok` | `.wasm` responses must carry `Content-Type: application/wasm` (required by `WebAssembly.instantiateStreaming`). |
+| `M-02` | JavaScript Module MIME Type | `fail` / `ok` | `.mjs` and `.js` responses must carry `text/javascript` or `application/javascript`. |
+| `C-01` | Payload Compression | `warn` / `ok` | Payloads exceeding `minCompressionBytes` (`1024` bytes) should be compressed with `br`, `gzip`, or `zstd`. |
+| `C-02` | Compression Cache Key (`Vary`) | `warn` | Compressed payloads must include `Vary: Accept-Encoding` so shared caches do not serve mismatched encodings. |
+| `R-01` | Revalidation Validators | `warn` | `index.html` should provide `ETag` or `Last-Modified` headers for conditional requests. |
+| `R-02` | Conditional `304 Not Modified` | `warn` / `ok` | Sends follow-up `GET` with `If-None-Match: <etag>` and verifies `304 Not Modified` (warns if origin returns `200 OK`). |
 
 ---
 
 ## 4. Technical Architecture & Packaging
 
-- **Language**: Dart (CLI application structure following `dart-build-cli-app` guidelines).
-- **Command Routing**: `package:args/command_runner.dart` implementing `FbConfigCommand` and `CheckCommand`.
-- **HTTP Client**: `package:http` for remote header and script fetching.
-- **Error Handling**: `package:stack_trace` with terse error formatting and POSIX exit codes (`exit(0)` on check pass, `exit(1)` on check failure or configuration error, `exit(64)` on CLI usage error).
+- **Language & Entrypoints**: Dart CLI (`bin/flutter_web_cache_check.dart`) and
+  programmatic library (`lib/flutter_web_cache_check.dart`).
+- **Command Routing**: `package:args/command_runner.dart` implementing
+  `FbConfigCommand` and `CheckCommand` (`--platform auto|firebase|generic`).
+- **HTTP Client**: Injectable `package:http` `Client` on `UrlChecker` for
+  deterministic unit testing (`MockClient`) and live remote auditing.

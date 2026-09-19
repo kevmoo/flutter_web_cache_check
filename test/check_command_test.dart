@@ -30,6 +30,7 @@ void main() {
           'Cache-Control',
           'public, max-age=31536000, immutable',
         );
+        request.response.headers.set('Content-Type', 'application/javascript');
         request.response.write('console.log("app");');
       } else {
         request.response.statusCode = 404;
@@ -71,6 +72,10 @@ void main() {
           request.response.headers.set(
             'Cache-Control',
             'public, max-age=31536000, immutable',
+          );
+          request.response.headers.set(
+            'Content-Type',
+            'application/javascript',
           );
           request.response.write('console.log("app");');
         } else {

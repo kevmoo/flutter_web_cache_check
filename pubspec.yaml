@@ -1,6 +1,6 @@
 name: flutter_web_cache_check
 description: A sample command-line application with basic argument parsing.
-version: 0.0.1
+version: 0.0.2-wip
 # repository: https://github.com/my_org/my_repo
 
 environment:

@@ -12,11 +12,18 @@ class CheckCommand extends Command<void> {
       'Live HTTP audit of a deployed Flutter web application.';
 
   CheckCommand() {
-    argParser.addOption(
-      'url',
-      abbr: 'u',
-      help: 'Target URL of the published Flutter web app.',
-    );
+    argParser
+      ..addOption(
+        'url',
+        abbr: 'u',
+        help: 'Target URL of the published Flutter web app.',
+      )
+      ..addOption(
+        'platform',
+        allowed: const <String>['auto', 'firebase', 'generic'],
+        defaultsTo: 'auto',
+        help: 'Host platform adapter mode (auto, firebase, generic).',
+      );
   }
 
   @override
@@ -35,6 +42,12 @@ class CheckCommand extends Command<void> {
     }
 
     final bool verbose = globalResults?['verbose'] as bool? ?? false;
-    await UrlChecker.checkUrl(targetUrl, verbose: verbose);
+    final String platformName = argResults!['platform'] as String? ?? 'auto';
+    final HostPlatform platform = switch (platformName) {
+      'firebase' => HostPlatform.firebase,
+      'generic' => HostPlatform.generic,
+      _ => HostPlatform.auto,
+    };
+    await UrlChecker.checkUrl(targetUrl, verbose: verbose, platform: platform);
   }
 }
