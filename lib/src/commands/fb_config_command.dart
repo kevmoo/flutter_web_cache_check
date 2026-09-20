@@ -22,7 +22,12 @@ class FbConfigCommand extends Command<void> {
       'add-predeploy',
       abbr: 'p',
       defaultsTo: true,
-      help: 'Add or update "flutter build web --web-content-hash" in hosting.predeploy.',
+      help: 'Add or update "flutter build web --wasm --web-content-hash" in hosting.predeploy.',
+    );
+    argParser.addFlag(
+      'wasm',
+      defaultsTo: true,
+      help: 'Include --wasm in the generated/updated flutter build web predeploy command.',
     );
   }
 
@@ -30,9 +35,14 @@ class FbConfigCommand extends Command<void> {
   Future<void> run() async {
     final String filePath = argResults!['file']! as String;
     final bool addPredeploy = argResults!['add-predeploy']! as bool;
+    final bool wasm = argResults!['wasm']! as bool;
 
     try {
-      FirebaseConfig.configure(filePath: filePath, addPredeploy: addPredeploy);
+      FirebaseConfig.configure(
+        filePath: filePath,
+        addPredeploy: addPredeploy,
+        wasm: wasm,
+      );
     } on FormatException catch (e) {
       stderr.writeln('Error: ${e.message}');
       exit(1);

@@ -23,6 +23,11 @@ class CheckCommand extends Command<void> {
         allowed: const <String>['auto', 'firebase', 'generic'],
         defaultsTo: 'auto',
         help: 'Host platform adapter mode (auto, firebase, generic).',
+      )
+      ..addFlag(
+        'wasm',
+        defaultsTo: true,
+        help: 'Require a WebAssembly (dart2wasm) build target in flutter_bootstrap.js.',
       );
   }
 
@@ -43,11 +48,17 @@ class CheckCommand extends Command<void> {
 
     final bool verbose = globalResults?['verbose'] as bool? ?? false;
     final String platformName = argResults!['platform'] as String? ?? 'auto';
+    final bool requireWasm = argResults!['wasm'] as bool? ?? true;
     final HostPlatform platform = switch (platformName) {
       'firebase' => HostPlatform.firebase,
       'generic' => HostPlatform.generic,
       _ => HostPlatform.auto,
     };
-    await UrlChecker.checkUrl(targetUrl, verbose: verbose, platform: platform);
+    await UrlChecker.checkUrl(
+      targetUrl,
+      verbose: verbose,
+      platform: platform,
+      requireWasm: requireWasm,
+    );
   }
 }
