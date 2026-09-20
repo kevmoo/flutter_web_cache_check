@@ -73,7 +73,16 @@ class VariantUpgradeScenario extends Scenario {
       result.error = 'build failed: ${b1.stderr}\n${b2.stderr}';
       return;
     }
-    final host = await ctx.host(HeaderPolicy.strict, basePath: basePath);
+    final effectivePolicy = ctx.useFirebaseEmulator
+        ? HeaderPolicy.firebaseRules
+        : HeaderPolicy.strict;
+    final host = await ctx.host(
+      effectivePolicy,
+      basePath: basePath,
+      useFirebaseEmulator:
+          ctx.useFirebaseEmulator &&
+          effectivePolicy == HeaderPolicy.firebaseRules,
+    );
     final profile = ctx.freshProfile(id);
     try {
       await host.deployAtomic(b1.outDir);
@@ -592,7 +601,10 @@ class CacheCheckDogfoodScenario extends Scenario {
     ScenarioResult result,
     BuildResult jsBuild,
   ) async {
-    final HostingServer host = await ctx.host(HeaderPolicy.firebaseRules);
+    final HostingServer host = await ctx.host(
+      HeaderPolicy.firebaseRules,
+      useFirebaseEmulator: ctx.useFirebaseEmulator,
+    );
     try {
       await host.deployAtomic(jsBuild.outDir);
       final CheckReport warnReport = await UrlChecker(host.baseUri.toString())
@@ -646,7 +658,11 @@ class CacheCheckDogfoodScenario extends Scenario {
     required bool requireWasm,
     required String labelPrefix,
   }) async {
-    final HostingServer host = await ctx.host(policy);
+    final HostingServer host = await ctx.host(
+      policy,
+      useFirebaseEmulator:
+          ctx.useFirebaseEmulator && policy == HeaderPolicy.firebaseRules,
+    );
     try {
       await host.deployAtomic(build.outDir);
       final CheckReport report = await UrlChecker(

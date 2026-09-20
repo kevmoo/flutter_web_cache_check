@@ -102,12 +102,14 @@ class ScenarioContext {
     required this.builder,
     required this.workDir,
     this.headless = true,
+    this.useFirebaseEmulator = false,
   });
 
   final FlutterSdk sdk;
   final Builder builder;
   final Directory workDir;
   final bool headless;
+  final bool useFirebaseEmulator;
   int _profileCounter = 0;
 
   Future<BuildResult> build(BuildOptions options) =>
@@ -126,19 +128,39 @@ class ScenarioContext {
   Future<ChromeSession> chrome(Directory profile) =>
       ChromeSession.launch(profileDir: profile, headless: headless);
 
+  HostingServer createServer({
+    required HeaderPolicy policy,
+    Duration cdnIndexTtl = Duration.zero,
+    bool spaRewrite = false,
+    String basePath = '/',
+    Duration negativeCacheTtl = Duration.zero,
+    bool? useFirebaseEmulator,
+  }) => HostingServer(
+    policy: policy,
+    cdnIndexTtl: cdnIndexTtl,
+    spaRewrite: spaRewrite,
+    basePath: basePath,
+    negativeCacheTtl: negativeCacheTtl,
+    useFirebaseEmulator:
+        useFirebaseEmulator ??
+        (this.useFirebaseEmulator && policy == HeaderPolicy.firebaseRules),
+  );
+
   Future<HostingServer> host(
     HeaderPolicy policy, {
     Duration cdnIndexTtl = Duration.zero,
     bool spaRewrite = false,
     String basePath = '/',
     Duration negativeCacheTtl = Duration.zero,
+    bool? useFirebaseEmulator,
   }) async {
-    final server = HostingServer(
+    final server = createServer(
       policy: policy,
       cdnIndexTtl: cdnIndexTtl,
       spaRewrite: spaRewrite,
       basePath: basePath,
       negativeCacheTtl: negativeCacheTtl,
+      useFirebaseEmulator: useFirebaseEmulator,
     );
     await server.start();
     return server;
