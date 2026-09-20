@@ -34,7 +34,7 @@ void main() {
     expect(hosting['public'], 'build/web');
     expect(
       hosting['predeploy'],
-      contains('flutter build web --web-content-hash'),
+      contains('flutter build web --wasm --web-content-hash'),
     );
 
     final List<Object?> headers = hosting['headers']! as List<Object?>;
@@ -184,6 +184,9 @@ void main() {
 
     final List<Object?> predeploy = hosting['predeploy']! as List<Object?>;
     expect(predeploy[0], 'npm run build');
-    expect(predeploy[1], 'flutter build web --release --web-content-hash');
+    expect(
+      predeploy[1],
+      'flutter build web --release --wasm --web-content-hash',
+    );
   });
 }

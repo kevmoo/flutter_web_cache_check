@@ -1,7 +1,7 @@
 name: flutter_web_cache_check
-description: A sample command-line application with basic argument parsing.
+description: CLI and library to configure and verify HTTP caching headers for Flutter web deployments.
 version: 0.0.2-wip
-# repository: https://github.com/my_org/my_repo
+repository: https://github.com/kevmoo/flutter_web_cache_check
 
 environment:
   sdk: ^3.13.0

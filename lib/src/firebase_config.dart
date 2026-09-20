@@ -62,20 +62,36 @@ class FirebaseConfig {
   static void configure({
     required String filePath,
     required bool addPredeploy,
+    bool wasm = true,
   }) {
     final File file = File(filePath);
     final Map<String, Object?> config = _loadConfigFile(file, filePath);
 
-    _applyHostingConfig(
-      config: config,
+    applyUpdates(
+      config,
       filePath: filePath,
       addPredeploy: addPredeploy,
+      wasm: wasm,
     );
 
     final String updatedJson = const JsonEncoder.withIndent('  ')
         .convert(config);
     file.writeAsStringSync('$updatedJson\n');
     print('✅ Successfully updated $filePath with caching rules.');
+  }
+
+  static void applyUpdates(
+    Map<String, Object?> root, {
+    String filePath = 'firebase.json',
+    bool addPredeploy = true,
+    bool wasm = true,
+  }) {
+    _applyHostingConfig(
+      config: root,
+      filePath: filePath,
+      addPredeploy: addPredeploy,
+      wasm: wasm,
+    );
   }
 
   static Map<String, Object?> _loadConfigFile(File file, String filePath) {
@@ -102,19 +118,20 @@ class FirebaseConfig {
     required Map<String, Object?> config,
     required String filePath,
     required bool addPredeploy,
+    required bool wasm,
   }) {
     final Object hostingObj =
         config['hosting'] ??
         (config['hosting'] = <String, Object?>{'public': 'build/web'});
 
     if (hostingObj is Map<String, Object?>) {
-      _configureHostingSection(hostingObj, addPredeploy);
+      _configureHostingSection(hostingObj, addPredeploy, wasm: wasm);
       return;
     }
     if (hostingObj is List<Object?>) {
       for (final Map<String, Object?> item
           in hostingObj.whereType<Map<String, Object?>>()) {
-        _configureHostingSection(item, addPredeploy);
+        _configureHostingSection(item, addPredeploy, wasm: wasm);
       }
       return;
     }
@@ -123,12 +140,13 @@ class FirebaseConfig {
 
   static void _configureHostingSection(
     Map<String, Object?> hosting,
-    bool addPredeploy,
-  ) {
+    bool addPredeploy, {
+    required bool wasm,
+  }) {
     _configureHeaders(hosting);
     _guardSpaRewrites(hosting);
     if (addPredeploy) {
-      _configurePredeploy(hosting);
+      _configurePredeploy(hosting, wasm: wasm);
     }
   }
 
@@ -168,48 +186,77 @@ class FirebaseConfig {
     }
   }
 
-  static void _configurePredeploy(Map<String, Object?> hosting) {
-    const String targetCommand = 'flutter build web --web-content-hash';
+  static void _configurePredeploy(
+    Map<String, Object?> hosting, {
+    required bool wasm,
+  }) {
+    final String targetCommand = wasm
+        ? 'flutter build web --wasm --web-content-hash'
+        : 'flutter build web --web-content-hash';
     final Object? predeploy = hosting['predeploy'];
 
     if (predeploy == null) {
       hosting['predeploy'] = <String>[targetCommand];
       print('Added "$targetCommand" to hosting.predeploy.');
     } else if (predeploy is String) {
-      _configureStringPredeploy(hosting, predeploy, targetCommand);
+      _configureStringPredeploy(hosting, predeploy, targetCommand, wasm: wasm);
     } else if (predeploy is List<Object?>) {
-      _configureListPredeploy(predeploy, targetCommand);
+      _configureListPredeploy(predeploy, targetCommand, wasm: wasm);
     }
+  }
+
+  static String _upgradeFlutterBuildCmd(String cmd, {required bool wasm}) {
+    final RegExp segmentReg = RegExp(r'flutter\s+build\s+web([^;&|]*)');
+    return cmd.replaceFirstMapped(segmentReg, (Match m) {
+      String segment = m.group(0)!;
+      final bool hadTrailingSpace = segment.endsWith(' ');
+      segment = segment.trimRight();
+      if (wasm) {
+        segment = segment.replaceAll(RegExp(r'\s+--no-wasm\b'), '');
+      }
+      segment = segment.replaceAll(RegExp(r'\s+--no-web-content-hash\b'), '');
+      if (wasm && !RegExp(r'(^|\s)--wasm(\s|$)').hasMatch(segment)) {
+        segment = '$segment --wasm';
+      }
+      if (!RegExp(r'(^|\s)--web-content-hash(\s|$)').hasMatch(segment)) {
+        segment = '$segment --web-content-hash';
+      }
+      return hadTrailingSpace ? '$segment ' : segment;
+    });
   }
 
   static void _configureStringPredeploy(
     Map<String, Object?> hosting,
     String predeploy,
-    String targetCommand,
-  ) {
+    String targetCommand, {
+    required bool wasm,
+  }) {
     if (!predeploy.contains('flutter build web')) {
       hosting['predeploy'] = <String>[predeploy, targetCommand];
       print('Added "$targetCommand" to predeploy array.');
       return;
     }
-    if (!predeploy.contains('--web-content-hash')) {
-      hosting['predeploy'] = '$predeploy --web-content-hash';
-      print('Appended --web-content-hash to predeploy string.');
+    final String upgraded = _upgradeFlutterBuildCmd(predeploy, wasm: wasm);
+    if (upgraded != predeploy) {
+      hosting['predeploy'] = upgraded;
+      print('Updated predeploy string to "$upgraded".');
     }
   }
 
   static void _configureListPredeploy(
     List<Object?> predeploy,
-    String targetCommand,
-  ) {
+    String targetCommand, {
+    required bool wasm,
+  }) {
     bool foundFlutterBuild = false;
     for (int i = 0; i < predeploy.length; i++) {
       final Object? cmd = predeploy[i];
       if (cmd is String && cmd.contains('flutter build web')) {
         foundFlutterBuild = true;
-        if (!cmd.contains('--web-content-hash')) {
-          predeploy[i] = '$cmd --web-content-hash';
-          print('Appended --web-content-hash to predeploy command.');
+        final String upgraded = _upgradeFlutterBuildCmd(cmd, wasm: wasm);
+        if (upgraded != cmd) {
+          predeploy[i] = upgraded;
+          print('Updated predeploy command to "$upgraded".');
         }
       }
     }

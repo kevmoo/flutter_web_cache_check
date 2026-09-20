@@ -2,22 +2,33 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
-enum Severity { ok, warn, fail }
+enum Severity {
+  ok,
+  warn,
+  fail;
+
+  static const Severity error = Severity.fail;
+}
 
 enum HostPlatform { auto, firebase, generic }
+
+typedef Finding = CheckFinding;
 
 class CheckFinding {
   const CheckFinding({
     required this.ruleId,
     required this.severity,
-    required this.path,
+    String? path,
+    String? url,
     required this.message,
-  });
+  }) : path = path ?? url ?? '';
 
   final String ruleId;
   final Severity severity;
   final String path;
   final String message;
+
+  String get url => path;
 
   @override
   String toString() =>
@@ -32,6 +43,8 @@ class CheckReport {
 
   bool get hasFailures =>
       findings.any((CheckFinding f) => f.severity == Severity.fail);
+
+  bool get hasErrors => hasFailures;
 
   bool get hasWarnings =>
       findings.any((CheckFinding f) => f.severity == Severity.warn);
@@ -166,6 +179,7 @@ class UrlChecker {
     http.Client? client,
     this.platform = HostPlatform.auto,
     this.minCompressionBytes = 1024,
+    this.requireWasm = true,
     this.verbose = false,
   }) : _client = client ?? http.Client(),
        _ownsClient = client == null;
@@ -175,6 +189,7 @@ class UrlChecker {
   final bool _ownsClient;
   final HostPlatform platform;
   final int minCompressionBytes;
+  final bool requireWasm;
   final bool verbose;
 
   static final RegExp _hashedPattern = RegExp(r'\.[0-9a-f]{8,64}\.');
@@ -183,11 +198,13 @@ class UrlChecker {
     String targetUrl, {
     bool verbose = false,
     HostPlatform platform = HostPlatform.auto,
+    bool requireWasm = true,
   }) async {
     final UrlChecker checker = UrlChecker(
       targetUrl,
       verbose: verbose,
       platform: platform,
+      requireWasm: requireWasm,
     );
     final int code = await checker.run();
     if (code != 0) {
@@ -294,13 +311,16 @@ class UrlChecker {
   }) {
     final String contentType = (resp.headers['content-type'] ?? '')
         .toLowerCase();
+    final String wasmDetail = path.endsWith('.wasm')
+        ? ' Missing .wasm requests rewritten to HTML (0x3c21444f / <!DO) break WebAssembly.compileStreaming().'
+        : '';
     findings.add(
       CheckFinding(
         ruleId: 'F-05',
         severity: Severity.fail,
         path: path,
         message:
-            'SPA catch-all rewrite poisoning: $path returned HTTP ${resp.statusCode} ($contentType) with Cache-Control "${resp.headers['cache-control']}". Exclude static asset paths from SPA rewrites.',
+            'SPA catch-all rewrite poisoning: $path returned HTTP ${resp.statusCode} ($contentType) with Cache-Control "${resp.headers['cache-control']}".$wasmDetail Exclude static asset paths from SPA rewrites.',
       ),
     );
   }
@@ -428,6 +448,8 @@ class UrlChecker {
       return detected;
     }
 
+    _evaluateWasmBuildTarget(bootstrapResp.body, findings);
+
     final List<_AssetTarget> targets = _extractTargets(bootstrapResp.body);
     final bool sawManifest = targets.any((_AssetTarget t) => t.isManifest);
 
@@ -449,6 +471,59 @@ class UrlChecker {
     }
 
     return detected;
+  }
+
+  static String _stripJsComments(String source) => source
+      .replaceAll(RegExp(r'/\*[\s\S]*?\*/'), '')
+      .replaceAll(RegExp(r'^\s*//.*$', multiLine: true), '');
+
+  void _evaluateWasmBuildTarget(
+    String bootstrapBody,
+    List<CheckFinding> findings,
+  ) {
+    final String stripped = _stripJsComments(bootstrapBody);
+    final RegExp wasmPathReg = RegExp(r'"mainWasmPath"\s*:\s*"([^"]*)"');
+    final Match? wasmMatch = wasmPathReg.firstMatch(stripped);
+    final String? mainWasmPath = wasmMatch?.group(1)?.trim();
+    final bool hasNonEmptyWasmPath =
+        mainWasmPath != null && mainWasmPath.isNotEmpty;
+    final bool hasExplicitEmptyWasmPath =
+        wasmMatch != null && !hasNonEmptyWasmPath;
+    final bool hasDart2Wasm =
+        hasNonEmptyWasmPath ||
+        (!hasExplicitEmptyWasmPath &&
+            RegExp(r'"compileTarget"\s*:\s*"dart2wasm"').hasMatch(stripped));
+
+    if (hasDart2Wasm) {
+      final String label = hasNonEmptyWasmPath ? mainWasmPath : 'dart2wasm';
+      findings.add(
+        CheckFinding(
+          ruleId: 'W-01',
+          severity: Severity.ok,
+          path: 'flutter_bootstrap.js',
+          message:
+              'WebAssembly (dart2wasm) build target detected in flutter_bootstrap.js ($label).',
+        ),
+      );
+    } else if (requireWasm) {
+      findings.add(
+        const CheckFinding(
+          ruleId: 'W-01',
+          severity: Severity.warn,
+          path: 'flutter_bootstrap.js',
+          message: 'No WebAssembly (dart2wasm) build target detected in flutter_bootstrap.js. Build with "flutter build web --wasm --web-content-hash" (or pass --no-wasm if intentionally JS-only).',
+        ),
+      );
+    } else {
+      findings.add(
+        const CheckFinding(
+          ruleId: 'W-01',
+          severity: Severity.ok,
+          path: 'flutter_bootstrap.js',
+          message: 'JS-only build target in flutter_bootstrap.js allowed via --no-wasm.',
+        ),
+      );
+    }
   }
 
   Future<HostPlatform> _probeAssetTarget({
@@ -582,6 +657,7 @@ class UrlChecker {
   }) async {
     const List<String> missingProbes = <String>[
       'main.dart.00000000.js',
+      'main.dart.00000000.wasm',
       'assets/__cache_check_missing__.00000000.png',
     ];
     HostPlatform detected = currentPlatform;
@@ -937,13 +1013,16 @@ class UrlChecker {
       rawPath.replaceFirst(RegExp(r'^(\./|/)+'), '');
 
   static List<_AssetTarget> _extractTargets(String bootstrapBody) {
+    final String stripped = _stripJsComments(bootstrapBody);
     final List<_AssetTarget> targets = <_AssetTarget>[];
+    final Set<String> seenPaths = <String>{};
     final RegExp entryReg = RegExp(
       r'"(mainJsPath|mainWasmPath|jsSupportRuntimePath)"\s*:\s*"([^"]+)"',
     );
-    for (final Match match in entryReg.allMatches(bootstrapBody)) {
+    for (final Match match in entryReg.allMatches(stripped)) {
       final String label = match.group(1)!;
-      final String cleanPath = _normalizeRelativePath(match.group(2)!);
+      final String cleanPath = _normalizeRelativePath(match.group(2)!.trim());
+      if (cleanPath.isEmpty || !seenPaths.add(cleanPath)) continue;
       targets.add(
         _AssetTarget(
           label: label,
@@ -957,12 +1036,14 @@ class UrlChecker {
     final RegExp manifestReg = RegExp(
       r'"(assetManifest|fontManifest)"\s*:\s*"([^"]+)"',
     );
-    for (final Match match in manifestReg.allMatches(bootstrapBody)) {
+    for (final Match match in manifestReg.allMatches(stripped)) {
       final String label = match.group(1)!;
-      final String cleanPath = _normalizeRelativePath(match.group(2)!);
+      final String cleanPath = _normalizeRelativePath(match.group(2)!.trim());
+      if (cleanPath.isEmpty) continue;
       final String resolvedPath = cleanPath.startsWith('assets/')
           ? cleanPath
           : 'assets/$cleanPath';
+      if (!seenPaths.add(resolvedPath)) continue;
       targets.add(
         _AssetTarget(
           label: label,
