@@ -51,7 +51,11 @@ class WarmUpgradeScenario extends Scenario {
       return;
     }
 
-    final host = await ctx.host(policy);
+    final host = await ctx.host(
+      policy,
+      useFirebaseEmulator:
+          ctx.useFirebaseEmulator && policy == HeaderPolicy.firebaseRules,
+    );
     final profile = ctx.freshProfile(id);
     try {
       await host.deployAtomic(v1.outDir);

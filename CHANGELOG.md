@@ -1,5 +1,6 @@
 ## 0.0.2-wip
 
+- Add `--backend=firebase-emulator` support in `tool/redteam_harness` (`HostingServer(useFirebaseEmulator: true)`) and recognize local Firebase `superstatic` emulator signatures (`127.0.0.1` / `localhost` 404 header middleware order, unquoted MD5 ETags, and uncompressed local responses) in `UrlChecker` (`E-01`, `E-02`, `E-03`).
 - Add first-class WebAssembly (`dart2wasm`) target detection (`W-01`, `--[no-]wasm`) in `UrlChecker` and `check` CLI.
 - Probe synthetic missing `.wasm` hashed entrypoints (`/main.dart.00000000.wasm`) for SPA HTML rewrite traps (`F-05`) and negative-cache `404` poisoning (`F-06`) (`W-02`).
 - Add `FirebaseConfig.applyUpdates` and `--[no-]wasm` support to `fb-config` (`W-03`), defaulting `hosting.predeploy` to `flutter build web --wasm --web-content-hash` and preserving `--wasm` when upgrading existing predeploy hooks.

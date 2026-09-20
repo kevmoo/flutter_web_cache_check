@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_web_cache_check/flutter_web_cache_check.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
@@ -166,12 +168,17 @@ class HostingServer {
     this.spaRewriteAll = false,
     this.basePath = '/',
     this.negativeCacheTtl = Duration.zero,
+    this.useFirebaseEmulator = false,
   });
 
   static List<Map<String, Object>> get firebaseRules =>
       FirebaseConfig.defaultHeaders;
 
   HeaderPolicy policy;
+
+  /// Whether to proxy `firebaseRules` requests through a live
+  /// `firebase emulators:start --only hosting` subprocess.
+  final bool useFirebaseEmulator;
 
   /// `Cache-Control` applied to 404 responses. Zero = `no-cache`
   /// (Firebase Hosting, S3). Some CDNs apply the path's header rules to 404s
@@ -198,6 +205,9 @@ class HostingServer {
   Directory get liveDir => Directory(p.join(root.path, 'live'));
 
   HttpServer? _server;
+  Process? _emulatorProcess;
+  int? _emulatorPort;
+  http.Client? _proxyClient;
   final List<ServedRequest> log = <ServedRequest>[];
   List<int>? _frozenIndex;
   DateTime? _frozenUntil;
@@ -207,14 +217,94 @@ class HostingServer {
   Future<void> start() async {
     liveDir.createSync(recursive: true);
     _server = await shelf_io.serve(_handle, InternetAddress.loopbackIPv4, 0);
+    if (useFirebaseEmulator) {
+      try {
+        await _startFirebaseEmulator();
+      } catch (_) {
+        await stop();
+        rethrow;
+      }
+    }
+  }
+
+  Future<void> _startFirebaseEmulator() async {
+    final ServerSocket socket = await ServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    final int emulatorPort = socket.port;
+    await socket.close();
+    _emulatorPort = emulatorPort;
+    _proxyClient = IOClient(HttpClient()..autoUncompress = false);
+
+    final Map<String, Object?> config = <String, Object?>{
+      'hosting': <String, Object?>{
+        'public': 'live',
+        if (spaRewrite)
+          'rewrites': <Object?>[
+            <String, Object?>{'source': '**', 'destination': '/index.html'},
+          ],
+      },
+    };
+    FirebaseConfig.applyUpdates(config, addPredeploy: false, wasm: true);
+    config['emulators'] = <String, Object?>{
+      'hosting': <String, Object?>{'host': '127.0.0.1', 'port': emulatorPort},
+    };
+    File(p.join(root.path, 'firebase.json')).writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert(config)}\n',
+    );
+
+    _emulatorProcess = await Process.start('firebase', <String>[
+      'emulators:start',
+      '--only',
+      'hosting',
+      '--project',
+      'demo-redteam',
+    ], workingDirectory: root.path);
+    _emulatorProcess!.stdout.drain<void>().ignore();
+    _emulatorProcess!.stderr.drain<void>().ignore();
+
+    await _waitForEmulatorReady(emulatorPort);
+  }
+
+  Future<void> _waitForEmulatorReady(int emulatorPort) async {
+    final Uri probeUri = Uri.parse('http://127.0.0.1:$emulatorPort/');
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final http.Response resp = await _proxyClient!
+            .get(probeUri)
+            .timeout(const Duration(milliseconds: 500));
+        if (resp.statusCode > 0) return;
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    throw StateError(
+      'Timed out waiting for firebase emulators:start on port $emulatorPort',
+    );
   }
 
   Future<void> stop() async {
     await _server?.close(force: true);
     _server = null;
+    _proxyClient?.close();
+    _proxyClient = null;
+    await _stopFirebaseEmulator();
     try {
       root.deleteSync(recursive: true);
     } catch (_) {}
+  }
+
+  Future<void> _stopFirebaseEmulator() async {
+    final Process? proc = _emulatorProcess;
+    _emulatorProcess = null;
+    if (proc == null) return;
+    proc.kill(ProcessSignal.sigterm);
+    try {
+      await proc.exitCode.timeout(const Duration(seconds: 2));
+    } catch (_) {
+      proc.kill(ProcessSignal.sigkill);
+    }
   }
 
   // --- deploy strategies -------------------------------------------------
@@ -295,6 +385,13 @@ class HostingServer {
 
   // --- serving --------------------------------------------------------------
 
+  bool get _shouldProxyToFirebaseEmulator =>
+      useFirebaseEmulator &&
+      _emulatorPort != null &&
+      policy == HeaderPolicy.firebaseRules &&
+      cdnIndexTtl == Duration.zero &&
+      !spaRewriteAll;
+
   Future<Response> _handle(Request request) async {
     if (request.method != 'GET' && request.method != 'HEAD') {
       return Response(405);
@@ -304,6 +401,9 @@ class HostingServer {
     if (strippedRel == null) {
       log.add(ServedRequest(rawRel, 404, null, conditional: false));
       return Response.notFound('outside base path: $rawRel');
+    }
+    if (_shouldProxyToFirebaseEmulator) {
+      return _proxyToFirebaseEmulator(request, strippedRel);
     }
     final originalRel = strippedRel;
     final resolved = _resolvePayload(originalRel);
@@ -347,6 +447,40 @@ class HostingServer {
     return Response.ok(
       request.method == 'HEAD' ? null : responseBody,
       headers: headers,
+    );
+  }
+
+  Future<Response> _proxyToFirebaseEmulator(Request request, String rel) async {
+    final String encodedRel = _stripBasePath(request.url.path) ?? rel;
+    final String subPath = basePath == '/' ? request.url.path : encodedRel;
+    final Uri targetUri = Uri.parse('http://127.0.0.1:$_emulatorPort/$subPath');
+    final http.Request emuReq = http.Request(request.method, targetUri);
+    final String? ifNoneMatch = request.headers['if-none-match'];
+    final String? acceptEncoding = request.headers['accept-encoding'];
+    if (ifNoneMatch != null) emuReq.headers['if-none-match'] = ifNoneMatch;
+    if (acceptEncoding != null) {
+      emuReq.headers['accept-encoding'] = acceptEncoding;
+    }
+    final http.StreamedResponse streamed = await _proxyClient!.send(emuReq);
+    final http.Response emuResp = await http.Response.fromStream(streamed);
+    log.add(
+      ServedRequest(
+        rel,
+        emuResp.statusCode,
+        emuResp.headers['cache-control'],
+        conditional: ifNoneMatch != null,
+      ),
+    );
+    final Map<String, String> outHeaders =
+        Map<String, String>.of(emuResp.headers)
+          ..remove('transfer-encoding')
+          ..remove('content-length');
+    return Response(
+      emuResp.statusCode,
+      body: request.method == 'HEAD' || emuResp.statusCode == 304
+          ? null
+          : emuResp.bodyBytes,
+      headers: outHeaders,
     );
   }
 

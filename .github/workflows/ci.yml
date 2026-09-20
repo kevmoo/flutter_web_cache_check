@@ -62,6 +62,8 @@ jobs:
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260
         with:
           sdk: dev
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
       - id: install
         name: Install harness dependencies
         run: dart pub get
@@ -83,6 +85,8 @@ jobs:
         with:
           channel: master
           cache: true
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
       - name: Install root and harness dependencies
         run: |
           dart pub get
@@ -92,7 +96,9 @@ jobs:
         run: |
           flutter pub get
           flutter build web --wasm --web-content-hash
-      - name: Run redteam_harness S15 dogfood (JS + WASM)
+      - name: Run redteam_harness S15 dogfood (JS + WASM, sim & firebase-emulator)
         run: |
           REDTEAM_FLUTTER_MASTER="$(dirname "$(dirname "$(which flutter)")")" \
-            dart tool/redteam_harness/bin/redteam.dart --only S15 --out /tmp/redteam_s15_ci
+            dart tool/redteam_harness/bin/redteam.dart --only S15 --backend sim --out /tmp/redteam_s15_sim_ci
+          REDTEAM_FLUTTER_MASTER="$(dirname "$(dirname "$(which flutter)")")" \
+            dart tool/redteam_harness/bin/redteam.dart --only S15 --backend firebase-emulator --out /tmp/redteam_s15_emul_ci

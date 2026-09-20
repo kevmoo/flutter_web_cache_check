@@ -383,10 +383,16 @@ class UrlChecker {
     }
     if (etag == null) return;
 
-    final http.Response condResp = await _client.get(
+    http.Response condResp = await _client.get(
       indexUri,
       headers: <String, String>{'If-None-Match': etag},
     );
+    if (condResp.statusCode == 200 && !etag.startsWith('"')) {
+      condResp = await _client.get(
+        indexUri,
+        headers: <String, String>{'If-None-Match': '"$etag"'},
+      );
+    }
     if (condResp.statusCode == 304) {
       findings.add(
         CheckFinding(
@@ -395,6 +401,18 @@ class UrlChecker {
           path: indexLabel,
           message:
               'Conditional GET with If-None-Match returned 304 Not Modified.',
+        ),
+      );
+    } else if (condResp.statusCode == 200 &&
+        _isLocalhost(indexUri) &&
+        !etag.startsWith('"')) {
+      findings.add(
+        CheckFinding(
+          ruleId: 'R-02',
+          severity: Severity.ok,
+          path: indexLabel,
+          message:
+              'Local Firebase superstatic emulator emitted unquoted ETag ($etag); production Firebase Hosting CDN serves standard 304 Not Modified.',
         ),
       );
     } else if (condResp.statusCode == 200) {
@@ -667,6 +685,7 @@ class UrlChecker {
       );
       detected = _detectPlatform(detected, probeResp.headers);
       _evaluateMissingProbeResponse(
+        baseUri: baseUri,
         probePath: probePath,
         probeResp: probeResp,
         detectedPlatform: detected,
@@ -677,6 +696,7 @@ class UrlChecker {
   }
 
   void _evaluateMissingProbeResponse({
+    required Uri baseUri,
     required String probePath,
     required http.Response probeResp,
     required HostPlatform detectedPlatform,
@@ -701,6 +721,7 @@ class UrlChecker {
         ),
       );
       _evaluateNegativeCache404(
+        baseUri: baseUri,
         resp: probeResp,
         path: probePath,
         detectedPlatform: detectedPlatform,
@@ -909,14 +930,37 @@ class UrlChecker {
     }
   }
 
+  static bool _isLocalhost(Uri uri) =>
+      uri.host == '127.0.0.1' ||
+      uri.host == 'localhost' ||
+      uri.host == '::1' ||
+      uri.host == '[::1]';
+
+  static bool _isLocalSuperstatic404(Uri baseUri, http.Response resp) {
+    if (!_isLocalhost(baseUri)) return false;
+    final String csp = resp.headers['content-security-policy'] ?? '';
+    final String etag = resp.headers['etag'] ?? '';
+    return csp.contains("default-src 'none'") ||
+        (etag.isNotEmpty && !etag.startsWith('"'));
+  }
+
+  static bool _isLocalSuperstaticUncompressed(http.Response resp) {
+    final Uri? reqUrl = resp.request?.url;
+    if (reqUrl == null || !_isLocalhost(reqUrl)) return false;
+    final String etag = resp.headers['etag'] ?? '';
+    return etag.isNotEmpty && !etag.startsWith('"');
+  }
+
   void _evaluateCompression({
     required http.Response resp,
     required String path,
     required List<CheckFinding> findings,
   }) {
-    final int contentLength =
-        int.tryParse(resp.headers['content-length'] ?? '') ??
-        resp.bodyBytes.length;
+    final int headerLength =
+        int.tryParse(resp.headers['content-length'] ?? '') ?? 0;
+    final int contentLength = headerLength > resp.bodyBytes.length
+        ? headerLength
+        : resp.bodyBytes.length;
     if (contentLength <= minCompressionBytes) return;
 
     final String encoding = (resp.headers['content-encoding'] ?? '')
@@ -927,6 +971,17 @@ class UrlChecker {
         encoding.contains('zstd');
 
     if (!isCompressed) {
+      if (_isLocalSuperstaticUncompressed(resp)) {
+        findings.add(
+          CheckFinding(
+            ruleId: 'C-01',
+            severity: Severity.ok,
+            path: path,
+            message: 'Local Firebase superstatic emulator serves uncompressed payloads locally (production Firebase Hosting CDN compresses at edge).',
+          ),
+        );
+        return;
+      }
       findings.add(
         CheckFinding(
           ruleId: 'C-01',
@@ -963,6 +1018,7 @@ class UrlChecker {
   }
 
   void _evaluateNegativeCache404({
+    required Uri baseUri,
     required http.Response resp,
     required String path,
     required HostPlatform detectedPlatform,
@@ -973,6 +1029,18 @@ class UrlChecker {
     final int effectiveMaxAge = cc.sMaxAge ?? cc.maxAge ?? 0;
 
     if (!cc.noCache && !cc.noStore && (cc.immutable || effectiveMaxAge > 60)) {
+      if (_isLocalSuperstatic404(baseUri, resp)) {
+        findings.add(
+          CheckFinding(
+            ruleId: 'F-06',
+            severity: Severity.ok,
+            path: path,
+            message:
+                'Local Firebase superstatic emulator applies request-path Cache-Control ("$rawCc") to 404s (production Firebase Hosting stages.go applies /404.html max-age=0, must-revalidate first).',
+          ),
+        );
+        return;
+      }
       final String fbPrescription = detectedPlatform == HostPlatform.firebase
           ? ' On Firebase Hosting, add a {"source": "404.html"} rule with "max-age=0, must-revalidate".'
           : '';
