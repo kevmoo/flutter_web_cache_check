@@ -25,9 +25,19 @@ ArgParser _buildParser(List<String> defaultSdk) => ArgParser()
   )
   ..addOption(
     'backend',
-    allowed: <String>['sim', 'firebase-emulator'],
+    allowed: <String>['sim', 'firebase-emulator', 'firebase-live'],
     defaultsTo: 'sim',
-    help: 'Hosting backend (sim or firebase-emulator).',
+    help: 'Hosting backend (sim, firebase-emulator, or firebase-live).',
+  )
+  ..addOption(
+    'firebase-project',
+    defaultsTo: Platform.environment['REDTEAM_FIREBASE_PROJECT'],
+    help: 'Firebase project ID (required for --backend=firebase-live).',
+  )
+  ..addOption(
+    'firebase-site',
+    defaultsTo: Platform.environment['REDTEAM_FIREBASE_SITE'],
+    help: 'Firebase Hosting site ID (required for --backend=firebase-live).',
   )
   ..addFlag('headed', negatable: false, help: 'Run Chromium with a window.');
 
@@ -76,6 +86,21 @@ Future<void> main(List<String> argv) async {
     return;
   }
 
+  final String backend = args['backend'] as String;
+  final String? firebaseProject = args['firebase-project'] as String?;
+  final String? firebaseSite = args['firebase-site'] as String?;
+  if (backend == 'firebase-live' &&
+      (firebaseProject == null ||
+          firebaseProject.isEmpty ||
+          firebaseSite == null ||
+          firebaseSite.isEmpty)) {
+    stderr.writeln(
+      'Error: --backend=firebase-live requires both --firebase-project and '
+      '--firebase-site.',
+    );
+    exit(64);
+  }
+
   final wanted = <String>[
     ...(args['scenario'] as List<String>),
     ...(args['only'] as List<String>),
@@ -119,7 +144,10 @@ Future<void> main(List<String> argv) async {
       workDir: workDir,
       outDir: outDir,
       headless: !(args['headed'] as bool),
-      useFirebaseEmulator: args['backend'] == 'firebase-emulator',
+      useFirebaseEmulator: backend == 'firebase-emulator',
+      useFirebaseLive: backend == 'firebase-live',
+      firebaseProject: firebaseProject,
+      firebaseSite: firebaseSite,
       results: results,
       sdkVersions: sdkVersions,
     );
@@ -138,6 +166,9 @@ Future<void> _runSdkScenarios({
   required Directory outDir,
   required bool headless,
   required bool useFirebaseEmulator,
+  required bool useFirebaseLive,
+  required String? firebaseProject,
+  required String? firebaseSite,
   required List<ScenarioResult> results,
   required Map<String, String> sdkVersions,
 }) async {
@@ -154,6 +185,9 @@ Future<void> _runSdkScenarios({
     workDir: workDir,
     headless: headless,
     useFirebaseEmulator: useFirebaseEmulator,
+    useFirebaseLive: useFirebaseLive,
+    firebaseProject: firebaseProject,
+    firebaseSite: firebaseSite,
   );
   for (final scenario in selected) {
     stdout.write('-- ${scenario.id} ${scenario.title} ... ');
