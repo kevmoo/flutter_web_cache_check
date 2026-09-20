@@ -1,5 +1,3 @@
-# flutter_web_cache_check
-
 CLI and library to configure and audit HTTP caching headers and WebAssembly (`--wasm`) deployment artifacts for Flutter web applications using `--web-content-hash`.
 
 ## Commands
