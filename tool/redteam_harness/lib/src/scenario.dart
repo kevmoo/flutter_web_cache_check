@@ -103,6 +103,9 @@ class ScenarioContext {
     required this.workDir,
     this.headless = true,
     this.useFirebaseEmulator = false,
+    this.useFirebaseLive = false,
+    this.firebaseProject,
+    this.firebaseSite,
   });
 
   final FlutterSdk sdk;
@@ -110,6 +113,9 @@ class ScenarioContext {
   final Directory workDir;
   final bool headless;
   final bool useFirebaseEmulator;
+  final bool useFirebaseLive;
+  final String? firebaseProject;
+  final String? firebaseSite;
   int _profileCounter = 0;
 
   Future<BuildResult> build(BuildOptions options) =>
@@ -135,6 +141,7 @@ class ScenarioContext {
     String basePath = '/',
     Duration negativeCacheTtl = Duration.zero,
     bool? useFirebaseEmulator,
+    bool? useFirebaseLive,
   }) => HostingServer(
     policy: policy,
     cdnIndexTtl: cdnIndexTtl,
@@ -144,6 +151,11 @@ class ScenarioContext {
     useFirebaseEmulator:
         useFirebaseEmulator ??
         (this.useFirebaseEmulator && policy == HeaderPolicy.firebaseRules),
+    useFirebaseLive:
+        useFirebaseLive ??
+        (this.useFirebaseLive && policy == HeaderPolicy.firebaseRules),
+    firebaseProject: firebaseProject,
+    firebaseSite: firebaseSite,
   );
 
   Future<HostingServer> host(
@@ -153,6 +165,7 @@ class ScenarioContext {
     String basePath = '/',
     Duration negativeCacheTtl = Duration.zero,
     bool? useFirebaseEmulator,
+    bool? useFirebaseLive,
   }) async {
     final server = createServer(
       policy: policy,
@@ -161,6 +174,7 @@ class ScenarioContext {
       basePath: basePath,
       negativeCacheTtl: negativeCacheTtl,
       useFirebaseEmulator: useFirebaseEmulator,
+      useFirebaseLive: useFirebaseLive,
     );
     await server.start();
     return server;

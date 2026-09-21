@@ -169,7 +169,22 @@ class HostingServer {
     this.basePath = '/',
     this.negativeCacheTtl = Duration.zero,
     this.useFirebaseEmulator = false,
-  });
+    this.useFirebaseLive = false,
+    this.firebaseProject,
+    this.firebaseSite,
+  }) {
+    if (useFirebaseLive &&
+        (firebaseProject == null ||
+            firebaseProject!.isEmpty ||
+            firebaseSite == null ||
+            firebaseSite!.isEmpty)) {
+      throw ArgumentError(
+        'useFirebaseLive requires non-empty firebaseProject and firebaseSite',
+      );
+    }
+  }
+
+  static int _liveChannelCounter = 0;
 
   static List<Map<String, Object>> get firebaseRules =>
       FirebaseConfig.defaultHeaders;
@@ -179,6 +194,12 @@ class HostingServer {
   /// Whether to proxy `firebaseRules` requests through a live
   /// `firebase emulators:start --only hosting` subprocess.
   final bool useFirebaseEmulator;
+
+  /// Whether to deploy `firebaseRules` builds to an ephemeral Firebase Hosting
+  /// preview channel (`firebase hosting:channel:deploy`).
+  final bool useFirebaseLive;
+  final String? firebaseProject;
+  final String? firebaseSite;
 
   /// `Cache-Control` applied to 404 responses. Zero = `no-cache`
   /// (Firebase Hosting, S3). Some CDNs apply the path's header rules to 404s
@@ -208,11 +229,25 @@ class HostingServer {
   Process? _emulatorProcess;
   int? _emulatorPort;
   http.Client? _proxyClient;
+  late final String _liveChannelId =
+      'redteam-$pid-${DateTime.now().millisecondsSinceEpoch}-${_liveChannelCounter++}';
+  Uri? _liveChannelUri;
+  bool _liveChannelDeployed = false;
   final List<ServedRequest> log = <ServedRequest>[];
   List<int>? _frozenIndex;
   DateTime? _frozenUntil;
 
-  Uri get baseUri => Uri.parse('http://127.0.0.1:${_server!.port}$basePath');
+  bool get _shouldUseFirebaseLive =>
+      useFirebaseLive &&
+      policy == HeaderPolicy.firebaseRules &&
+      cdnIndexTtl == Duration.zero &&
+      !spaRewriteAll;
+
+  Uri get baseUri => (_shouldUseFirebaseLive && _liveChannelUri != null)
+      ? _liveChannelUri!.resolve(
+          basePath.startsWith('/') ? basePath.substring(1) : basePath,
+        )
+      : Uri.parse('http://127.0.0.1:${_server!.port}$basePath');
 
   Future<void> start() async {
     liveDir.createSync(recursive: true);
@@ -290,6 +325,7 @@ class HostingServer {
     _proxyClient?.close();
     _proxyClient = null;
     await _stopFirebaseEmulator();
+    await _deleteFirebaseLiveChannel();
     try {
       root.deleteSync(recursive: true);
     } catch (_) {}
@@ -305,6 +341,94 @@ class HostingServer {
     } catch (_) {
       proc.kill(ProcessSignal.sigkill);
     }
+  }
+
+  Future<void> _deployFirebaseLiveChannel(Directory build) async {
+    if (basePath != '/') {
+      final String sub = basePath.replaceAll(RegExp(r'^/+|/+$'), '');
+      if (sub.isNotEmpty) {
+        await _copyTree(build, Directory(p.join(liveDir.path, sub)));
+      }
+    }
+    final Map<String, Object?> config = <String, Object?>{
+      'hosting': <String, Object?>{
+        'site': firebaseSite,
+        'public': 'live',
+        if (spaRewrite)
+          'rewrites': <Object?>[
+            <String, Object?>{'source': '**', 'destination': '/index.html'},
+          ],
+      },
+    };
+    FirebaseConfig.applyUpdates(config, addPredeploy: false, wasm: true);
+    File(p.join(root.path, 'firebase.json')).writeAsStringSync(
+      '${const JsonEncoder.withIndent('  ').convert(config)}\n',
+    );
+
+    final ProcessResult res = await Process.run('firebase', <String>[
+      'hosting:channel:deploy',
+      _liveChannelId,
+      '--project',
+      firebaseProject!,
+      '--expires',
+      '1h',
+      '--no-authorized-domains',
+      '--json',
+    ], workingDirectory: root.path);
+    if (res.exitCode != 0) {
+      throw StateError(
+        'firebase hosting:channel:deploy failed (${res.exitCode}): '
+        '${res.stdout}\n${res.stderr}',
+      );
+    }
+    final Map<String, Object?> decoded =
+        jsonDecode(res.stdout as String) as Map<String, Object?>;
+    final Map<String, Object?> resultMap =
+        decoded['result'] as Map<String, Object?>;
+    final Map<String, Object?> siteInfo =
+        (resultMap[firebaseSite!] ?? resultMap.values.first)
+            as Map<String, Object?>;
+    final String rawUrl = siteInfo['url'] as String;
+    _liveChannelUri = Uri.parse(rawUrl.endsWith('/') ? rawUrl : '$rawUrl/');
+    _liveChannelDeployed = true;
+    await _waitForLiveIndex(build);
+  }
+
+  Future<void> _waitForLiveIndex(Directory build) async {
+    final File indexFile = File(p.join(build.path, 'index.html'));
+    if (!indexFile.existsSync()) return;
+    final String expectedIndex = indexFile.readAsStringSync();
+    final Uri indexUri = baseUri.resolve('index.html');
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 15));
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final http.Response r = await http
+            .get(
+              indexUri,
+              headers: <String, String>{'Cache-Control': 'no-cache'},
+            )
+            .timeout(const Duration(seconds: 3));
+        if (r.statusCode == 200 && r.body == expectedIndex) break;
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+  }
+
+  Future<void> _deleteFirebaseLiveChannel() async {
+    if (!_liveChannelDeployed) return;
+    _liveChannelDeployed = false;
+    try {
+      await Process.run('firebase', <String>[
+        'hosting:channel:delete',
+        _liveChannelId,
+        '--project',
+        firebaseProject!,
+        '--site',
+        firebaseSite!,
+        '--force',
+        '--json',
+      ], workingDirectory: root.path);
+    } catch (_) {}
   }
 
   // --- deploy strategies -------------------------------------------------
@@ -330,6 +454,9 @@ class HostingServer {
     if (liveDir.existsSync()) liveDir.renameSync(old.path);
     staging.renameSync(liveDir.path);
     if (old.existsSync()) old.deleteSync(recursive: true);
+    if (_shouldUseFirebaseLive) {
+      await _deployFirebaseLiveChannel(build);
+    }
   }
 
   /// Copy the new build over the existing site without deleting anything
