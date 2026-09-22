@@ -56,7 +56,7 @@ last matching rule wins** for any duplicate header key (`Cache-Control`).
 | 4     | `assets/@(AssetManifest.json\|AssetManifest.bin\|AssetManifest.bin.json\|FontManifest.json\|NOTICES)` | `max-age=0, must-revalidate`          | Overrides Rule 3 (`assets/**`) so unhashed Flutter manifest files revalidate on every deploy.                                                                     |
 | 5     | `404.html`                                                                                            | `max-age=0, must-revalidate`          | Prevents CDN edges or browsers from caching `404 Not Found` responses during non-atomic deploy rollouts.                                                          |
 
-### 2.3 Guarded SPA Rewrite (`!/@(assets|canvaskit|icons|main.dart.*)/**`)
+### 2.3 Guarded SPA Rewrite (`!(/assets/**|/canvaskit/**|/icons/**|/main.dart.*)`)
 
 An unguarded SPA catch-all rewrite
 (`"source": "**", "destination": "/index.html"`) causes missing hashed bundles
@@ -68,7 +68,7 @@ targeting `/index.html`, it automatically rewrites `"source"` to:
 
 ```json
 {
-  "source": "!/@(assets|canvaskit|icons|main.dart.*)/**",
+  "source": "!(/assets/**|/canvaskit/**|/icons/**|/main.dart.*)",
   "destination": "/index.html"
 }
 ```

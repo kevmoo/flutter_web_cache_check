@@ -57,7 +57,7 @@ class FirebaseConfig {
   };
 
   static const String guardedSpaRewriteSource =
-      '!/@(assets|canvaskit|icons|main.dart.*)/**';
+      '!(/assets/**|/canvaskit/**|/icons/**|/main.dart.*)';
 
   static void configure({
     required String filePath,
@@ -177,7 +177,11 @@ class FirebaseConfig {
         in rewrites.whereType<Map<String, Object?>>()) {
       final Object? source = item['source'];
       final Object? destination = item['destination'];
-      final bool isCatchAll = source == '**' || source == '**/*';
+      final bool isCatchAll =
+          source == '**' ||
+          source == '**/*' ||
+          source == '!/@(assets|canvaskit|icons|main.dart.*)/**' ||
+          source == '!/@(assets|canvaskit)/**';
       final bool isIndexDest =
           destination == '/index.html' || destination == 'index.html';
       if (isCatchAll && isIndexDest) {

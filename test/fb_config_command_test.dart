@@ -179,7 +179,7 @@ void main() {
     expect(rewrites, isNotEmpty);
     expect(
       (rewrites[0] as Map<String, Object?>)['source'],
-      '!/@(assets|canvaskit|icons|main.dart.*)/**',
+      '!(/assets/**|/canvaskit/**|/icons/**|/main.dart.*)',
     );
 
     final List<Object?> predeploy = hosting['predeploy']! as List<Object?>;
