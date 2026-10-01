@@ -703,25 +703,21 @@ class UrlChecker {
     } on FormatException {
       return detected;
     }
-    if (decoded is! Map<String, Object?> ||
-        decoded['version'] != 1 ||
-        decoded['entries'] is! List<Object?>) {
-      return detected;
+    if (decoded case {'version': 1, 'entries': final List<Object?> entries}) {
+      _evaluateUnhashedAssetResponse(
+        resp: manifestResp,
+        path: precacheManifestPath,
+        label: 'precache manifest',
+        ruleId: 'F-07',
+        findings: findings,
+      );
+
+      _evaluatePrecacheManifestEntries(
+        entries: entries,
+        targets: targets,
+        findings: findings,
+      );
     }
-
-    _evaluateUnhashedAssetResponse(
-      resp: manifestResp,
-      path: precacheManifestPath,
-      label: 'precache manifest',
-      ruleId: 'F-07',
-      findings: findings,
-    );
-
-    _evaluatePrecacheManifestEntries(
-      entries: decoded['entries']! as List<Object?>,
-      targets: targets,
-      findings: findings,
-    );
     return detected;
   }
 
@@ -778,26 +774,29 @@ class UrlChecker {
     Map<String, Object?> entry,
     Set<String> manifestUrls,
   ) {
-    final Object? rawUrl = entry['url'];
-    final Object? rawHash = entry['hash'];
-    final Object? rawUrlHashed = entry['urlHashed'];
-    if (rawUrl is! String || rawHash is! String || rawUrlHashed is! bool) {
-      return 'malformed entry ($entry)';
+    if (entry case {
+      'url': final String rawUrl,
+      'hash': final String rawHash,
+      'urlHashed': final bool rawUrlHashed,
+    }) {
+      final String cleanUrl = _normalizeRelativePath(rawUrl);
+      manifestUrls.add(cleanUrl);
+      if (_isExcludedPrecacheArtifact(cleanUrl)) {
+        return '$cleanUrl (non-runtime artifact must be excluded)';
+      }
+      final String basename = cleanUrl.split('/').last;
+      final bool hashMatchesFilename =
+          basename.contains('.$rawHash.') || basename.endsWith('.$rawHash');
+      final bool hasFilenameHash = _hashedEntryFilenamePattern.hasMatch(
+        basename,
+      );
+      if (rawUrlHashed != hashMatchesFilename ||
+          (hasFilenameHash && !rawUrlHashed)) {
+        return '$cleanUrl (hash=$rawHash, urlHashed=$rawUrlHashed)';
+      }
+      return null;
     }
-    final String cleanUrl = _normalizeRelativePath(rawUrl);
-    manifestUrls.add(cleanUrl);
-    if (_isExcludedPrecacheArtifact(cleanUrl)) {
-      return '$cleanUrl (non-runtime artifact must be excluded)';
-    }
-    final String basename = cleanUrl.split('/').last;
-    final bool hashMatchesFilename =
-        basename.contains('.$rawHash.') || basename.endsWith('.$rawHash');
-    final bool hasFilenameHash = _hashedEntryFilenamePattern.hasMatch(basename);
-    if (rawUrlHashed != hashMatchesFilename ||
-        (hasFilenameHash && !rawUrlHashed)) {
-      return '$cleanUrl (hash=$rawHash, urlHashed=$rawUrlHashed)';
-    }
-    return null;
+    return 'malformed entry ($entry)';
   }
 
   static bool _isExcludedPrecacheArtifact(String url) =>
