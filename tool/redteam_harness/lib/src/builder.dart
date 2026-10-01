@@ -66,6 +66,7 @@ class BuildOptions {
     required this.version,
     this.contentHash = true,
     this.wasm = false,
+    this.sourceMaps = false,
     this.baseHref,
     this.pwaStrategy = 'offline-first',
     this.flavor,
@@ -80,6 +81,7 @@ class BuildOptions {
   final String version;
   final bool contentHash;
   final bool wasm;
+  final bool sourceMaps;
   final String? baseHref;
   final String pwaStrategy;
   final String? flavor;
@@ -103,6 +105,7 @@ class BuildOptions {
     version,
     if (contentHash) 'hash' else 'nohash',
     if (wasm) 'wasm',
+    if (sourceMaps) 'sourcemaps',
     // No '=' anywhere: dart2js splits `--packages=<path>` on it.
     if (baseHref != null) 'base-$baseHref',
     'pwa-$pwaStrategy',
@@ -281,6 +284,7 @@ class Builder {
     outDir.path,
     if (options.contentHash) '--web-content-hash',
     if (options.wasm) '--wasm',
+    if (options.sourceMaps) '--source-maps',
     if (options.baseHref != null) '--base-href=${options.baseHref}',
     if (options.flavor != null) '--flavor=${options.flavor}',
     if (options.target != null) '--target=${options.target}',

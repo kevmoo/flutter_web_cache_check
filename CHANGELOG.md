@@ -1,5 +1,6 @@
 ## 0.0.2-wip
 
+- Add `precache_manifest.json` probing (`F-07` revalidation + `F-08` content-hash / `urlHashed` consistency check) in `UrlChecker`, and add `BuildOptions(sourceMaps: true)` (`--source-maps`) + `sourceMappingURL` resolution checks to `S12` (`PrecacheManifestScenario`) in `tool/redteam_harness` (`flutter/flutter#193601`).
 - Add `--backend=firebase-emulator` support in `tool/redteam_harness` (`HostingServer(useFirebaseEmulator: true)`) and recognize local Firebase `superstatic` emulator signatures (`127.0.0.1` / `localhost` 404 header middleware order, unquoted MD5 ETags, and uncompressed local responses) in `UrlChecker` (`E-01`, `E-02`, `E-03`).
 - Add first-class WebAssembly (`dart2wasm`) target detection (`W-01`, `--[no-]wasm`) in `UrlChecker` and `check` CLI.
 - Probe synthetic missing `.wasm` hashed entrypoints (`/main.dart.00000000.wasm`) for SPA HTML rewrite traps (`F-05`) and negative-cache `404` poisoning (`F-06`) (`W-02`).

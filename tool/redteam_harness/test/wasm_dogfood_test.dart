@@ -1,3 +1,6 @@
+@TestOn('vm')
+library;
+
 import 'dart:io';
 
 import 'package:flutter_web_cache_check/flutter_web_cache_check.dart';
@@ -59,6 +62,43 @@ _flutter.buildConfig = {
   writeFile('main.dart.785ea741.js', 'console.log("v1"); // ${'j' * 2048}');
   writeFile('assets/AssetManifest.bin.10579154.json', '{"assets":[]}');
   writeFile('assets/FontManifest.e5f60718.json', '[]');
+  writeFile('precache_manifest.json', '''
+{
+  "version": 1,
+  "entries": [
+    {
+      "url": "assets/AssetManifest.bin.10579154.json",
+      "hash": "10579154",
+      "size": 13,
+      "urlHashed": true
+    },
+    {
+      "url": "assets/FontManifest.e5f60718.json",
+      "hash": "e5f60718",
+      "size": 2,
+      "urlHashed": true
+    },${includeWasm ? '''
+    {
+      "url": "main.dart.5f77f974.wasm",
+      "hash": "5f77f974",
+      "size": 2056,
+      "urlHashed": true
+    },
+    {
+      "url": "main.dart.db41cfdb.mjs",
+      "hash": "db41cfdb",
+      "size": 2085,
+      "urlHashed": true
+    },''' : ''}
+    {
+      "url": "main.dart.785ea741.js",
+      "hash": "785ea741",
+      "size": 2069,
+      "urlHashed": true
+    }
+  ]
+}
+''');
 }
 
 void main() {
@@ -129,7 +169,7 @@ void main() {
       try {
         await host.deployAtomic(wasmDir);
 
-        // 1. HeaderPolicy.firebaseRules -> 0 errors, 0 warnings, W-01/M-01/M-02/F-03/F-05 ok
+        // 1. HeaderPolicy.firebaseRules -> 0 errors, 0 warnings, W-01/M-01/M-02/F-03/F-05/F-07/F-08 ok
         host.policy = HeaderPolicy.firebaseRules;
         final CheckReport fbRulesReport = await UrlChecker(
           host.baseUri.toString(),
@@ -142,6 +182,8 @@ void main() {
           'M-02',
           'F-03',
           'F-05',
+          'F-07',
+          'F-08',
         ]) {
           expect(
             fbRulesReport.findings.any(
