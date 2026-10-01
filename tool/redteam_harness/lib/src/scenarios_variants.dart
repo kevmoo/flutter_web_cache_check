@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
 import 'builder.dart';
+import 'chrome.dart';
 import 'hosting.dart';
 import 'scenario.dart';
 
@@ -402,6 +403,7 @@ class PrecacheManifestScenario extends Scenario {
         badSourceMaps.isEmpty,
         badSourceMaps.take(6).join(' | '),
       );
+      await _verifyWasmSourceMap(host.baseUri, step);
 
       final live = host
           .liveFiles()
@@ -417,8 +419,137 @@ class PrecacheManifestScenario extends Scenario {
       step.notes.add(
         '${entries.length} entries; hashed: ${entries.where((e) => e['urlHashed'] == true).length}',
       );
+
+      await _verifyChromeSourceMaps(ctx, result, host, urls);
     } finally {
       await host.stop();
+    }
+  }
+
+  static Future<void> _verifyWasmSourceMap(Uri baseUri, Step step) async {
+    final wasmMapResp = await http.get(baseUri.resolve('main.dart.wasm.map'));
+    final validWasmMap =
+        wasmMapResp.statusCode == 200 &&
+        _isValidSourceMapV3Json(wasmMapResp.body);
+    step.check(
+      'main.dart.wasm.map resolves (200 OK) with valid Source Map v3 JSON',
+      validWasmMap,
+      'status=${wasmMapResp.statusCode}',
+    );
+  }
+
+  static Future<void> _verifyChromeSourceMaps(
+    ScenarioContext ctx,
+    ScenarioResult result,
+    HostingServer host,
+    List<String> urls,
+  ) async {
+    final chromeStep = result.step(
+      'chrome Debugger.scriptParsed source maps (Wasm + JS)',
+    );
+    final chrome = await ctx.chrome(ctx.freshProfile('S12'));
+    try {
+      final report = await loadAndCapture(
+        chromeStep,
+        chrome,
+        host,
+        host.baseUri,
+      );
+      checkHealthyLoad(chromeStep, chrome, report, expectedVersion: 'v1');
+
+      final mainJsUrl = urls.firstWhere(
+        (u) => u.startsWith('main.dart.') && u.endsWith('.js'),
+        orElse: () => '',
+      );
+      if (mainJsUrl.isNotEmpty) {
+        await chrome.evaluate('''
+new Promise((resolve) => {
+  const s = document.createElement('script');
+  s.src = ${json.encode(mainJsUrl)};
+  s.onload = () => resolve(true);
+  s.onerror = () => resolve(false);
+  document.head.appendChild(s);
+})
+''');
+      }
+
+      final wasmScript = chrome.parsedScripts
+          .where(
+            (s) => s.path.endsWith('.wasm') && s.path.contains('main.dart.'),
+          )
+          .firstOrNull;
+      chromeStep.check(
+        'Chrome Debugger.scriptParsed reports sourceMapURL for main.dart.<hash>.wasm',
+        wasmScript?.sourceMapUrl == 'main.dart.wasm.map',
+        'wasmScript=${wasmScript?.toJson()}',
+      );
+      if (wasmScript?.sourceMapUrl != null) {
+        final resolvedWasmMap = Uri.parse(wasmScript!.url)
+            .resolve(wasmScript.sourceMapUrl!)
+            .toString();
+        final wasmMapOk = await _chromeFetchSourceMapV3(
+          chrome,
+          resolvedWasmMap,
+        );
+        chromeStep.check(
+          'Chrome fetches and parses main.dart.wasm.map (200 OK, Source Map v3)',
+          wasmMapOk,
+          resolvedWasmMap,
+        );
+      }
+
+      final jsScript = chrome.parsedScripts
+          .where((s) => s.path.endsWith('.js') && s.path.contains('main.dart.'))
+          .firstOrNull;
+      final jsMapUrl = jsScript?.sourceMapUrl ?? '';
+      chromeStep.check(
+        'Chrome Debugger.scriptParsed reports hashed sourceMapURL for main.dart.<hash>.js',
+        jsMapUrl.isNotEmpty && _hashedFilenameRegex.hasMatch(jsMapUrl),
+        'jsScript=${jsScript?.toJson()}',
+      );
+      if (jsScript != null && jsMapUrl.isNotEmpty) {
+        final resolvedJsMap = Uri.parse(jsScript.url)
+            .resolve(jsMapUrl)
+            .toString();
+        final jsMapOk = await _chromeFetchSourceMapV3(chrome, resolvedJsMap);
+        chromeStep.check(
+          'Chrome fetches and parses main.dart.<hash>.js.map (200 OK, Source Map v3)',
+          jsMapOk,
+          resolvedJsMap,
+        );
+      }
+    } finally {
+      await chrome.close();
+    }
+  }
+
+  static Future<bool> _chromeFetchSourceMapV3(
+    ChromeSession chrome,
+    String mapUrl,
+  ) async {
+    final res = await chrome.evaluate('''
+fetch(${json.encode(mapUrl)}).then(async (r) => {
+  if (r.status !== 200) return false;
+  const data = await r.json();
+  return data && data.version === 3 && Array.isArray(data.sources) && data.sources.length > 0 && typeof data.mappings === 'string' && data.mappings.length > 0;
+}).catch(() => false)
+''');
+    return res == true;
+  }
+
+  static bool _isValidSourceMapV3Json(String body) {
+    try {
+      final decoded = json.decode(body);
+      if (decoded case {
+        'version': 3,
+        'sources': final List<Object?> sources,
+        'mappings': final String mappings,
+      }) {
+        return sources.isNotEmpty && mappings.isNotEmpty;
+      }
+      return false;
+    } on FormatException {
+      return false;
     }
   }
 
@@ -506,7 +637,7 @@ class PrecacheManifestScenario extends Scenario {
     final mapResp = await http.get(
       baseUri.resolve(Uri.encodeFull(url)).resolve(mapUrl),
     );
-    if (mapResp.statusCode != 200) {
+    if (mapResp.statusCode != 200 || !_isValidSourceMapV3Json(mapResp.body)) {
       badSourceMaps.add('$url -> $mapUrl (${mapResp.statusCode})');
     }
   }
