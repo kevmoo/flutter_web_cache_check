@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -193,6 +194,9 @@ class UrlChecker {
   final bool verbose;
 
   static final RegExp _hashedPattern = RegExp(r'\.[0-9a-f]{8,64}\.');
+  static final RegExp _hashedEntryFilenamePattern = RegExp(
+    r'\.[0-9a-f]{8,64}(\.|$)',
+  );
 
   static Future<void> checkUrl(
     String targetUrl, {
@@ -488,6 +492,13 @@ class UrlChecker {
       );
     }
 
+    detected = await _probePrecacheManifest(
+      baseUri: baseUri,
+      targets: targets,
+      currentPlatform: detected,
+      findings: findings,
+    );
+
     return detected;
   }
 
@@ -667,6 +678,132 @@ class UrlChecker {
     );
     return detected;
   }
+
+  Future<HostPlatform> _probePrecacheManifest({
+    required Uri baseUri,
+    required List<_AssetTarget> targets,
+    required HostPlatform currentPlatform,
+    required List<CheckFinding> findings,
+  }) async {
+    const String precacheManifestPath = 'precache_manifest.json';
+    final http.Response manifestResp = await _client.get(
+      baseUri.resolve(precacheManifestPath),
+    );
+    final HostPlatform detected = _detectPlatform(
+      currentPlatform,
+      manifestResp.headers,
+    );
+    if (manifestResp.statusCode != 200 || _isHtmlSpaFallback(manifestResp)) {
+      return detected;
+    }
+
+    final Object? decoded;
+    try {
+      decoded = json.decode(manifestResp.body);
+    } on FormatException {
+      return detected;
+    }
+    if (decoded is! Map<String, Object?> ||
+        decoded['version'] != 1 ||
+        decoded['entries'] is! List<Object?>) {
+      return detected;
+    }
+
+    _evaluateUnhashedAssetResponse(
+      resp: manifestResp,
+      path: precacheManifestPath,
+      label: 'precache manifest',
+      ruleId: 'F-07',
+      findings: findings,
+    );
+
+    _evaluatePrecacheManifestEntries(
+      entries: decoded['entries']! as List<Object?>,
+      targets: targets,
+      findings: findings,
+    );
+    return detected;
+  }
+
+  static void _evaluatePrecacheManifestEntries({
+    required List<Object?> entries,
+    required List<_AssetTarget> targets,
+    required List<CheckFinding> findings,
+  }) {
+    final List<String> issues = <String>[];
+    final Set<String> manifestUrls = <String>{};
+
+    for (final Object? rawEntry in entries) {
+      if (rawEntry is! Map<String, Object?>) continue;
+      final String? issue = _validatePrecacheManifestEntry(
+        rawEntry,
+        manifestUrls,
+      );
+      if (issue != null) {
+        issues.add(issue);
+      }
+    }
+
+    for (final _AssetTarget target in targets) {
+      if (target.isHashed &&
+          !target.isManifest &&
+          !manifestUrls.contains(target.path)) {
+        issues.add('${target.path} missing from precache_manifest.json');
+      }
+    }
+
+    if (issues.isNotEmpty) {
+      findings.add(
+        CheckFinding(
+          ruleId: 'F-08',
+          severity: Severity.fail,
+          path: 'precache_manifest.json',
+          message:
+              'Invalid precache_manifest.json entries: ${issues.take(5).join(', ')}.',
+        ),
+      );
+    } else {
+      findings.add(
+        const CheckFinding(
+          ruleId: 'F-08',
+          severity: Severity.ok,
+          path: 'precache_manifest.json',
+          message: 'All entries in precache_manifest.json have consistent content hashes and urlHashed flags.',
+        ),
+      );
+    }
+  }
+
+  static String? _validatePrecacheManifestEntry(
+    Map<String, Object?> entry,
+    Set<String> manifestUrls,
+  ) {
+    final Object? rawUrl = entry['url'];
+    final Object? rawHash = entry['hash'];
+    final Object? rawUrlHashed = entry['urlHashed'];
+    if (rawUrl is! String || rawHash is! String || rawUrlHashed is! bool) {
+      return 'malformed entry ($entry)';
+    }
+    final String cleanUrl = _normalizeRelativePath(rawUrl);
+    manifestUrls.add(cleanUrl);
+    if (_isExcludedPrecacheArtifact(cleanUrl)) {
+      return '$cleanUrl (non-runtime artifact must be excluded)';
+    }
+    final String basename = cleanUrl.split('/').last;
+    final bool hashMatchesFilename =
+        basename.contains('.$rawHash.') || basename.endsWith('.$rawHash');
+    final bool hasFilenameHash = _hashedEntryFilenamePattern.hasMatch(basename);
+    if (rawUrlHashed != hashMatchesFilename ||
+        (hasFilenameHash && !rawUrlHashed)) {
+      return '$cleanUrl (hash=$rawHash, urlHashed=$rawUrlHashed)';
+    }
+    return null;
+  }
+
+  static bool _isExcludedPrecacheArtifact(String url) =>
+      url.endsWith('.map') ||
+      url.endsWith('.symbols') ||
+      url.endsWith('.info.json');
 
   Future<HostPlatform> _probeMissingHashedAssets({
     required Uri baseUri,

@@ -186,6 +186,7 @@ void main() {
   _registerW01Tests();
   _registerW02Tests();
   _registerE02Tests();
+  _registerF08Tests();
 }
 
 void _registerW01Tests() {
@@ -447,5 +448,146 @@ void _registerE02Tests() {
         );
       },
     );
+  });
+}
+
+http.Client _buildPrecacheManifestClient({
+  required String manifestBody,
+  String manifestCacheControl = 'max-age=0, must-revalidate',
+}) => MockClient((http.Request request) async {
+  if (request.url.path == '/precache_manifest.json') {
+    return http.Response(
+      manifestBody,
+      200,
+      headers: <String, String>{
+        'cache-control': manifestCacheControl,
+        'content-type': 'application/json',
+      },
+    );
+  }
+  return _handleBootstrapRequest(
+    request,
+    bootstrapBody: '_flutter.buildConfig = {"builds":[{"compileTarget":"dart2wasm","mainWasmPath":"main.dart.5f77f974.wasm","jsSupportRuntimePath":"main.dart.db41cfdb.mjs"},{"compileTarget":"dart2js","mainJsPath":"main.dart.785ea741.js"}]};',
+    wasmCacheControl: 'public, max-age=31536000, immutable',
+    wasmContentType: 'application/wasm',
+    mjsCacheControl: 'public, max-age=31536000, immutable',
+    mjsContentType: 'text/javascript',
+  );
+});
+
+void _registerF08Tests() {
+  group('F-07 & F-08: precache_manifest.json validation', () {
+    test('passes F-07 and F-08 when precache_manifest.json revalidates and all hashed entries match', () async {
+      const String validManifest = '''
+{
+  "version": 1,
+  "entries": [
+    {"url": "index.html", "hash": "11111111", "size": 13, "urlHashed": false},
+    {"url": "flutter_bootstrap.js", "hash": "22222222", "size": 100, "urlHashed": false},
+    {"url": "main.dart.5f77f974.wasm", "hash": "5f77f974", "size": 8, "urlHashed": true},
+    {"url": "main.dart.db41cfdb.mjs", "hash": "db41cfdb", "size": 36, "urlHashed": true},
+    {"url": "main.dart.785ea741.js", "hash": "785ea741", "size": 19, "urlHashed": true}
+  ]
+}
+''';
+      final CheckReport report = await UrlChecker(
+        'https://example.com',
+        client: _buildPrecacheManifestClient(manifestBody: validManifest),
+        minCompressionBytes: 100000,
+      ).analyze();
+
+      expect(report.hasErrors, isFalse);
+      expect(
+        report.findings.any(
+          (CheckFinding f) =>
+              f.ruleId == 'F-07' &&
+              f.path == 'precache_manifest.json' &&
+              f.severity == Severity.ok,
+        ),
+        isTrue,
+      );
+      expect(
+        report.findings.any(
+          (CheckFinding f) =>
+              f.ruleId == 'F-08' &&
+              f.path == 'precache_manifest.json' &&
+              f.severity == Severity.ok,
+        ),
+        isTrue,
+      );
+    });
+
+    test('fails F-08 when --source-maps mutates JS after hashing (urlHashed: false on hashed filename)', () async {
+      const String brokenSourceMapManifest = '''
+{
+  "version": 1,
+  "entries": [
+    {"url": "main.dart.5f77f974.wasm", "hash": "5f77f974", "size": 8, "urlHashed": true},
+    {"url": "main.dart.db41cfdb.mjs", "hash": "b8c4bc7f", "size": 36, "urlHashed": false},
+    {"url": "main.dart.785ea741.js", "hash": "fca793b5", "size": 19, "urlHashed": false}
+  ]
+}
+''';
+      final CheckReport report = await UrlChecker(
+        'https://example.com',
+        client: _buildPrecacheManifestClient(
+          manifestBody: brokenSourceMapManifest,
+        ),
+        minCompressionBytes: 100000,
+      ).analyze();
+
+      expect(
+        report.findings.any(
+          (CheckFinding f) =>
+              f.ruleId == 'F-08' &&
+              f.path == 'precache_manifest.json' &&
+              f.severity == Severity.fail &&
+              f.message.contains('main.dart.785ea741.js') &&
+              f.message.contains('main.dart.db41cfdb.mjs'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('fails F-07 when precache_manifest.json is cached with max-age > 0 and F-08 when .map is included or entrypoint is missing', () async {
+      const String badManifest = '''
+{
+  "version": 1,
+  "entries": [
+    {"url": "main.dart.5f77f974.wasm", "hash": "5f77f974", "size": 8, "urlHashed": true},
+    {"url": "main.dart.785ea741.js.map", "hash": "785ea741", "size": 10, "urlHashed": true}
+  ]
+}
+''';
+      final CheckReport report = await UrlChecker(
+        'https://example.com',
+        client: _buildPrecacheManifestClient(
+          manifestBody: badManifest,
+          manifestCacheControl: 'public, max-age=3600',
+        ),
+        minCompressionBytes: 100000,
+      ).analyze();
+
+      expect(
+        report.findings.any(
+          (CheckFinding f) =>
+              f.ruleId == 'F-07' &&
+              f.path == 'precache_manifest.json' &&
+              f.severity == Severity.fail,
+        ),
+        isTrue,
+      );
+      expect(
+        report.findings.any(
+          (CheckFinding f) =>
+              f.ruleId == 'F-08' &&
+              f.path == 'precache_manifest.json' &&
+              f.severity == Severity.fail &&
+              f.message.contains('main.dart.785ea741.js.map') &&
+              f.message.contains('main.dart.db41cfdb.mjs missing'),
+        ),
+        isTrue,
+      );
+    });
   });
 }

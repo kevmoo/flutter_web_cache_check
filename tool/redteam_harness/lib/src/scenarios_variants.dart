@@ -321,7 +321,8 @@ class DeferredImportScenario extends Scenario {
   }
 }
 
-/// S12: Phase 3's `precache_manifest.json` must describe reality.
+/// S12: Phase 3's `precache_manifest.json` must describe reality (including
+/// `--wasm --source-maps` builds where `sourceMappingURL` is rewritten).
 class PrecacheManifestScenario extends Scenario {
   @override
   String get id => 'S12';
@@ -329,16 +330,24 @@ class PrecacheManifestScenario extends Scenario {
   String get title => 'precache_manifest.json vs the actual build output';
   @override
   String get description =>
-      'Every entry resolves, hash+size match the bytes, urlHashed is right, and every runtime file is listed.';
+      'Every entry resolves, hash+size match the bytes, urlHashed is right (including with --wasm --source-maps), sourceMappingURL targets resolve, and every runtime file is listed.';
 
   static const Set<String> _expectedExcluded = {
     'flutter_service_worker.js',
     'precache_manifest.json',
   };
 
+  static final RegExp _hashedFilenameRegex = RegExp(r'\.[0-9a-f]{8}(\.|$)');
+  static final RegExp _sourceMapDirectiveRegex = RegExp(
+    r'//[#@]\s*sourceMappingURL=(\S+)\s*$',
+    multiLine: true,
+  );
+
   @override
   Future<void> run(ScenarioContext ctx, ScenarioResult result) async {
-    final b = await ctx.build(const BuildOptions(version: 'v1'));
+    final b = await ctx.build(
+      const BuildOptions(version: 'v1', wasm: true, sourceMaps: true),
+    );
     result.builds.add(b.toJson());
     if (!b.succeeded) {
       result.error = 'build failed';
@@ -368,25 +377,15 @@ class PrecacheManifestScenario extends Scenario {
       await host.deployAtomic(b.outDir);
       final mismatches = <String>[];
       final badUrlHashed = <String>[];
+      final badSourceMaps = <String>[];
       for (final e in entries) {
-        final url = e['url'] as String;
-        final resp = await http.get(host.baseUri.resolve(Uri.encodeFull(url)));
-        if (resp.statusCode != 200) {
-          mismatches.add('$url → ${resp.statusCode}');
-          continue;
-        }
-        final hash = sha256.convert(resp.bodyBytes).toString().substring(0, 8);
-        if (hash != e['hash'] || resp.bodyBytes.length != e['size']) {
-          mismatches.add(
-            '$url hash ${e['hash']}≠$hash or size ${e['size']}≠${resp.bodyBytes.length}',
-          );
-        }
-        final base = p.posix.basename(url);
-        final actuallyHashed =
-            base.contains('.$hash.') || base.endsWith('.$hash');
-        if (actuallyHashed != (e['urlHashed'] == true)) {
-          badUrlHashed.add('$url urlHashed=${e['urlHashed']}');
-        }
+        await _verifyManifestEntry(
+          host.baseUri,
+          e,
+          mismatches,
+          badUrlHashed,
+          badSourceMaps,
+        );
       }
       step.check(
         'every entry resolves with matching hash and size',
@@ -394,23 +393,20 @@ class PrecacheManifestScenario extends Scenario {
         mismatches.take(6).join(' | '),
       );
       step.check(
-        'urlHashed is accurate',
+        'urlHashed is accurate and all entrypoints/assets match their filename hash',
         badUrlHashed.isEmpty,
         badUrlHashed.take(6).join(' | '),
+      );
+      step.check(
+        'every compiled JS/MJS entrypoint has a hashed sourceMappingURL that resolves (200 OK)',
+        badSourceMaps.isEmpty,
+        badSourceMaps.take(6).join(' | '),
       );
 
       final live = host
           .liveFiles()
           .map((f) => p.posix.joinAll(p.split(f)))
-          .where(
-            (f) =>
-                !f.startsWith('canvaskit/') &&
-                !f.startsWith('.') &&
-                !f.endsWith('.map') &&
-                !f.endsWith('.symbols') &&
-                !f.endsWith('.info.json') &&
-                !_expectedExcluded.contains(f),
-          )
+          .where(_isIncludedRuntimeFile)
           .toSet();
       final missing = live.difference(urls.toSet());
       step.check(
@@ -423,6 +419,95 @@ class PrecacheManifestScenario extends Scenario {
       );
     } finally {
       await host.stop();
+    }
+  }
+
+  static bool _isIncludedRuntimeFile(String f) =>
+      !f.startsWith('canvaskit/') &&
+      !f.startsWith('.') &&
+      !f.endsWith('.map') &&
+      !f.endsWith('.symbols') &&
+      !f.endsWith('.info.json') &&
+      !_expectedExcluded.contains(f);
+
+  static Future<void> _verifyManifestEntry(
+    Uri baseUri,
+    Map<String, Object?> e,
+    List<String> mismatches,
+    List<String> badUrlHashed,
+    List<String> badSourceMaps,
+  ) async {
+    final url = e['url'] as String;
+    final resp = await http.get(baseUri.resolve(Uri.encodeFull(url)));
+    if (resp.statusCode != 200) {
+      mismatches.add('$url → ${resp.statusCode}');
+      return;
+    }
+    final hash = sha256.convert(resp.bodyBytes).toString().substring(0, 8);
+    if (hash != e['hash'] || resp.bodyBytes.length != e['size']) {
+      mismatches.add(
+        '$url hash ${e['hash']}≠$hash or size ${e['size']}≠${resp.bodyBytes.length}',
+      );
+    }
+    final base = p.posix.basename(url);
+    if (!_isUrlHashedValid(url, base, hash, e['urlHashed'])) {
+      badUrlHashed.add(
+        '$url (hash=${e['hash']}, actual=$hash, urlHashed=${e['urlHashed']})',
+      );
+    }
+    await _verifySourceMapDirective(
+      baseUri,
+      url,
+      base,
+      resp.body,
+      badSourceMaps,
+    );
+  }
+
+  static bool _isUrlHashedValid(
+    String url,
+    String base,
+    String hash,
+    Object? urlHashed,
+  ) {
+    final actuallyHashed = base.contains('.$hash.') || base.endsWith('.$hash');
+    final shouldBeHashed =
+        _hashedFilenameRegex.hasMatch(base) ||
+        url.startsWith('main.dart.') ||
+        url.startsWith('assets/');
+    if (actuallyHashed != (urlHashed == true)) return false;
+    if (shouldBeHashed && (!actuallyHashed || urlHashed != true)) return false;
+    return true;
+  }
+
+  static Future<void> _verifySourceMapDirective(
+    Uri baseUri,
+    String url,
+    String base,
+    String body,
+    List<String> badSourceMaps,
+  ) async {
+    if (!base.startsWith('main.dart.') ||
+        (!base.endsWith('.js') && !base.endsWith('.mjs'))) {
+      return;
+    }
+    final mapMatch = _sourceMapDirectiveRegex.firstMatch(body);
+    if (mapMatch == null) {
+      if (base.endsWith('.js')) {
+        badSourceMaps.add('$url missing sourceMappingURL');
+      }
+      return;
+    }
+    final mapUrl = mapMatch.group(1)!;
+    if (!_hashedFilenameRegex.hasMatch(mapUrl)) {
+      badSourceMaps.add('$url -> $mapUrl (unhashed map URL)');
+      return;
+    }
+    final mapResp = await http.get(
+      baseUri.resolve(Uri.encodeFull(url)).resolve(mapUrl),
+    );
+    if (mapResp.statusCode != 200) {
+      badSourceMaps.add('$url -> $mapUrl (${mapResp.statusCode})');
     }
   }
 }
@@ -581,10 +666,20 @@ class CacheCheckDogfoodScenario extends Scenario {
   @override
   Future<void> run(ScenarioContext ctx, ScenarioResult result) async {
     final BuildResult jsBuild = await ctx.build(
-      const BuildOptions(version: 'v1', contentHash: true, wasm: false),
+      const BuildOptions(
+        version: 'v1',
+        contentHash: true,
+        wasm: false,
+        sourceMaps: true,
+      ),
     );
     final BuildResult wasmBuild = await ctx.build(
-      const BuildOptions(version: 'v1', contentHash: true, wasm: true),
+      const BuildOptions(
+        version: 'v1',
+        contentHash: true,
+        wasm: true,
+        sourceMaps: true,
+      ),
     );
     result.builds.addAll([jsBuild.toJson(), wasmBuild.toJson()]);
     if (!jsBuild.succeeded || !wasmBuild.succeeded) {
@@ -680,7 +775,14 @@ class CacheCheckDogfoodScenario extends Scenario {
         report.findings.map((CheckFinding f) => f.toString()).join(' | '),
       );
       if (requireWasm && policy == HeaderPolicy.firebaseRules) {
-        _checkExpectedRulesOk(step, report);
+        final bool hasPrecacheManifest = File(
+          p.join(build.outDir.path, 'precache_manifest.json'),
+        ).existsSync();
+        _checkExpectedRulesOk(
+          step,
+          report,
+          hasPrecacheManifest: hasPrecacheManifest,
+        );
       }
       step.notes.add(host.log.map((r) => '${r.path}:${r.status}').join(', '));
     } finally {
@@ -688,13 +790,18 @@ class CacheCheckDogfoodScenario extends Scenario {
     }
   }
 
-  void _checkExpectedRulesOk(Step step, CheckReport report) {
+  void _checkExpectedRulesOk(
+    Step step,
+    CheckReport report, {
+    required bool hasPrecacheManifest,
+  }) {
     for (final String ruleId in <String>[
       'W-01',
       'M-01',
       'M-02',
       'F-03',
       'F-05',
+      if (hasPrecacheManifest) ...<String>['F-07', 'F-08'],
     ]) {
       final bool hasOk = report.findings.any(
         (CheckFinding f) => f.ruleId == ruleId && f.severity == Severity.ok,
