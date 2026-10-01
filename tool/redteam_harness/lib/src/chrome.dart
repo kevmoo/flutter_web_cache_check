@@ -69,6 +69,31 @@ class ServiceWorkerVersion {
   };
 }
 
+/// A script or WebAssembly module parsed by V8 (`Debugger.scriptParsed`).
+class ParsedScriptRecord {
+  ParsedScriptRecord({
+    required this.scriptId,
+    required this.url,
+    this.sourceMapUrl,
+    this.scriptLanguage,
+  });
+
+  final String scriptId;
+  final String url;
+  final String? sourceMapUrl;
+  final String? scriptLanguage;
+
+  String get path => Uri.tryParse(url)?.path ?? url;
+
+  Map<String, Object?> toJson() => {
+    'scriptId': scriptId,
+    'url': url,
+    if (sourceMapUrl != null && sourceMapUrl!.isNotEmpty)
+      'sourceMapUrl': sourceMapUrl,
+    if (scriptLanguage != null) 'scriptLanguage': scriptLanguage,
+  };
+}
+
 /// Resolves a Chromium binary: `$REDTEAM_CHROME`, then Playwright's download,
 /// then a system Chrome.
 String resolveChromeBinary() {
@@ -129,6 +154,7 @@ class ChromeSession {
   final Map<String, ServiceWorkerVersion> serviceWorkers =
       <String, ServiceWorkerVersion>{};
   final List<String> serviceWorkerEvents = <String>[];
+  final List<ParsedScriptRecord> parsedScripts = <ParsedScriptRecord>[];
 
   /// Top-level navigations since the last [resetObservations] (1 = the load
   /// itself; more = the page reloaded itself, e.g. a service worker
@@ -229,6 +255,7 @@ class ChromeSession {
     await _page.sendCommand('Runtime.enable');
     await _page.sendCommand('Log.enable');
     await _page.sendCommand('ServiceWorker.enable');
+    await _page.sendCommand('Debugger.enable');
   }
 
   void _onNotification(WipEvent event) {
@@ -250,6 +277,8 @@ class ChromeSession {
         _onLogEntryAdded(params);
       case 'ServiceWorker.workerVersionUpdated':
         _onWorkerVersionUpdated(params);
+      case 'Debugger.scriptParsed':
+        _onScriptParsed(params);
       case 'Page.frameNavigated':
         final frame = params['frame'] as Map<String, Object?>;
         if (frame['parentId'] == null) navigations++;
@@ -257,6 +286,22 @@ class ChromeSession {
         serviceWorkerEvents.add('ERROR ${params['errorMessage']}');
         consoleErrors.add('service worker error: ${params['errorMessage']}');
     }
+  }
+
+  void _onScriptParsed(Map<String, Object?> params) {
+    final url = (params['url'] as String?) ?? '';
+    if (!url.startsWith('http')) return;
+    final sourceMapUrl = params['sourceMapURL'] as String?;
+    parsedScripts.add(
+      ParsedScriptRecord(
+        scriptId: params['scriptId'] as String,
+        url: url,
+        sourceMapUrl: (sourceMapUrl != null && sourceMapUrl.isNotEmpty)
+            ? sourceMapUrl
+            : null,
+        scriptLanguage: params['scriptLanguage'] as String?,
+      ),
+    );
   }
 
   void _onRequestWillBeSent(Map<String, Object?> params) {
@@ -349,6 +394,7 @@ class ChromeSession {
     consoleMessages.clear();
     logEntries.clear();
     serviceWorkerEvents.clear();
+    parsedScripts.clear();
     navigations = 0;
   }
 
@@ -499,6 +545,7 @@ class ChromeSession {
     'logEntries': logEntries,
     'serviceWorkers': serviceWorkers.values.map((v) => v.toJson()).toList(),
     'serviceWorkerEvents': serviceWorkerEvents,
+    'parsedScripts': parsedScripts.map((s) => s.toJson()).toList(),
     'navigations': navigations,
   };
 }
