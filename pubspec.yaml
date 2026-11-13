@@ -1,5 +1,6 @@
 name: flutter_web_cache_check
 description: CLI and library to configure and verify HTTP caching headers for Flutter web deployments.
+publish_to: none
 version: 0.0.2-wip
 repository: https://github.com/kevmoo/flutter_web_cache_check
 
