@@ -10,8 +10,9 @@ import 'builder.dart';
 import 'chrome.dart';
 import 'hosting.dart';
 import 'scenario.dart';
+import 'scenarios_flag_toggle.dart';
 
-/// Build-variant and Phase 3 scenarios (S7–S14).
+/// Build-variant and Phase 3 scenarios (S7–S16).
 List<Scenario> variantScenarios() => <Scenario>[
   VariantUpgradeScenario(
     'S7',
@@ -39,6 +40,7 @@ List<Scenario> variantScenarios() => <Scenario>[
   IncrementalRebuildScenario(),
   TwoTabScenario(),
   CacheCheckDogfoodScenario(),
+  ContentHashFlagToggleScenario(),
 ];
 
 /// Generic warm upgrade under strict headers for a build variant.

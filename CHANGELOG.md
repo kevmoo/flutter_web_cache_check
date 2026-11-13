@@ -1,5 +1,8 @@
 ## 0.0.2-wip
 
+- Fail `F-08` in `UrlChecker` when a stale `precache_manifest.json` lingers on
+  an unhashed deployment or lists `main.dart.*` entrypoints not referenced by
+  `flutter_bootstrap.js` (`flutter/flutter#196452`).
 - Add `precache_manifest.json` probing (`F-07` revalidation + `F-08`
   content-hash / `urlHashed` consistency check) in `UrlChecker`, and add
   `BuildOptions(sourceMaps: true)` (`--source-maps`) + `sourceMappingURL`
