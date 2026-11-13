@@ -1,30 +1,28 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import 'entrypoints.dart';
+
 /// The offline-first service worker every Flutter web app shipped before
 /// flutter/flutter#176834 (Oct 2025). Users who visited such an app still
 /// have it installed; a new deploy has to migrate them off it.
-final String legacyServiceWorkerTemplate = File(
-  p.join(_packageRoot(), 'lib', 'src', 'legacy_sw_template.js'),
-).readAsStringSync();
+final String legacyServiceWorkerTemplate = File(_resolveTemplatePath())
+    .readAsStringSync();
 
-String _packageRoot() {
-  // Resolve relative to this file so it works from any working directory.
-  final uri = Platform.script;
-  var dir = Directory(p.dirname(uri.toFilePath()));
-  while (!File(p.join(dir.path, 'pubspec.yaml')).existsSync()) {
-    final parent = dir.parent;
-    if (parent.path == dir.path) {
-      throw StateError(
-        'Cannot locate harness pubspec.yaml from ${uri.toFilePath()}',
-      );
-    }
-    dir = parent;
+String _resolveTemplatePath() {
+  final resolved = Isolate.resolvePackageUriSync(
+    Uri.parse('package:redteam_harness/src/legacy_sw_template.js'),
+  );
+  if (resolved == null) {
+    throw StateError(
+      'Cannot resolve package:redteam_harness/src/legacy_sw_template.js',
+    );
   }
-  return dir.path;
+  return p.fromUri(resolved);
 }
 
 /// Rewrites `flutter_service_worker.js` in [build] with the legacy worker,
@@ -44,7 +42,7 @@ void injectLegacyServiceWorker(Directory build) {
     if (rel == 'index.html') resources['/'] = hash;
   }
   final entry = resources.keys.firstWhere(
-    (k) => RegExp(r'^main\.dart(\.[a-f0-9]{8})?\.js$').hasMatch(k),
+    (k) => isMainEntrypoint(k, jsOnly: true),
     orElse: () => 'main.dart.js',
   );
   final core = <String>[
