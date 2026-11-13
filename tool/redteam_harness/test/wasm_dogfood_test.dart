@@ -276,5 +276,124 @@ void main() {
         await host.stop();
       }
     });
+
+    test('stateful flag-toggle deploy simulation catches missing bootloaders and stale precache_manifest.json', () async {
+      final Directory hashedDir = Directory(p.join(tempDir.path, 'hashed'))
+        ..createSync(recursive: true);
+      _populateSyntheticDeploy(hashedDir, includeWasm: true);
+
+      final Directory plainDir = Directory(p.join(tempDir.path, 'plain'))
+        ..createSync(recursive: true);
+      void writePlain(String rel, String content) {
+        final File f = File(p.join(plainDir.path, rel));
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync(content);
+      }
+
+      writePlain(
+        'index.html',
+        '<!DOCTYPE html><html><body>Plain</body></html>',
+      );
+      writePlain('flutter_bootstrap.js', '''
+_flutter.buildConfig = {
+  "builds": [
+    {
+      "compileTarget": "dart2wasm",
+      "renderer": "skwasm",
+      "mainWasmPath": "main.dart.wasm",
+      "jsSupportRuntimePath": "main.dart.mjs"
+    },
+    {
+      "compileTarget": "dart2js",
+      "renderer": "canvaskit",
+      "mainJsPath": "main.dart.js"
+    }
+  ]
+};
+''');
+      writePlain('main.dart.wasm', '\x00asm\x01\x00\x00\x00${'w' * 2048}');
+      writePlain(
+        'main.dart.mjs',
+        'export const instantiate = () => {}; // ${'m' * 2048}',
+      );
+      writePlain('main.dart.js', 'console.log("plain"); // ${'j' * 2048}');
+      writePlain('assets/AssetManifest.bin.json', '{"assets":[]}');
+
+      final Directory brokenPlainDir = Directory(
+        p.join(tempDir.path, 'broken_plain'),
+      )..createSync(recursive: true);
+      File(p.join(plainDir.path, 'main.dart.js'))
+          .copySync(p.join(brokenPlainDir.path, 'main.dart.js'));
+
+      final HostingServer host = HostingServer(
+        policy: HeaderPolicy.firebaseRules,
+      );
+      await host.start();
+      try {
+        // 1. Broken plain deploy missing index.html & flutter_bootstrap.js -> F-01 & F-02 fail
+        await host.deployAtomic(brokenPlainDir);
+        final CheckReport brokenReport = await UrlChecker(
+          host.baseUri.toString(),
+          requireWasm: false,
+        ).analyze();
+        expect(brokenReport.hasFailures, isTrue);
+        expect(
+          brokenReport.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'F-01' && f.severity == Severity.fail,
+          ),
+          isTrue,
+        );
+        expect(
+          brokenReport.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'F-02' && f.severity == Severity.fail,
+          ),
+          isTrue,
+        );
+
+        // 2. Overlay plain deploy over hashed deploy leaving stale precache_manifest.json -> F-08 fail
+        await host.deployAtomic(hashedDir);
+        await host.deployOverlay(plainDir);
+        final CheckReport staleManifestReport = await UrlChecker(
+          host.baseUri.toString(),
+        ).analyze();
+        expect(staleManifestReport.hasFailures, isTrue);
+        expect(
+          staleManifestReport.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'F-08' &&
+                f.severity == Severity.fail &&
+                f.message.contains('unhashed deployment'),
+          ),
+          isTrue,
+        );
+
+        // 3. Clean atomic plain deploy -> 0 errors, 0 warnings
+        await host.deployAtomic(plainDir);
+        final CheckReport cleanPlainReport = await UrlChecker(
+          host.baseUri.toString(),
+        ).analyze();
+        expect(cleanPlainReport.hasFailures, isFalse);
+        expect(cleanPlainReport.hasWarnings, isFalse);
+      } finally {
+        await host.stop();
+      }
+    });
+
+    test('allScenarios registers unique scenario IDs including S16 ContentHashFlagToggleScenario', () {
+      final List<Scenario> scenarios = allScenarios();
+      final Set<String> ids = <String>{};
+      for (final Scenario s in scenarios) {
+        expect(s.id, isNotEmpty);
+        expect(s.title, isNotEmpty);
+        expect(s.description, isNotEmpty);
+        expect(ids.add(s.id), isTrue, reason: 'Duplicate scenario id ${s.id}');
+      }
+      expect(
+        scenarios.whereType<ContentHashFlagToggleScenario>(),
+        hasLength(1),
+      );
+    });
   });
 }

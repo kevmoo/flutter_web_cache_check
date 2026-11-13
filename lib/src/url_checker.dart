@@ -197,6 +197,9 @@ class UrlChecker {
   static final RegExp _hashedEntryFilenamePattern = RegExp(
     r'\.[0-9a-f]{8,64}(\.|$)',
   );
+  static final RegExp _mainEntrypointPattern = RegExp(
+    r'^main\.dart(\.[0-9a-f]{8,64})?\.(js|wasm|mjs)$',
+  );
 
   static Future<void> checkUrl(
     String targetUrl, {
@@ -732,13 +735,7 @@ class UrlChecker {
       }
     }
 
-    for (final target in targets) {
-      if (target.isHashed &&
-          !target.isManifest &&
-          !manifestUrls.contains(target.path)) {
-        issues.add('${target.path} missing from precache_manifest.json');
-      }
-    }
+    issues.addAll(_collectTargetManifestIssues(targets, manifestUrls));
 
     if (issues.isNotEmpty) {
       findings.add(
@@ -763,6 +760,34 @@ class UrlChecker {
         ),
       );
     }
+  }
+
+  static List<String> _collectTargetManifestIssues(
+    List<_AssetTarget> targets,
+    Set<String> manifestUrls,
+  ) {
+    if (targets.isEmpty) return const <String>[];
+    final issues = <String>[];
+    if (!targets.any((_AssetTarget t) => t.isHashed)) {
+      issues.add('stale precache_manifest.json served on unhashed deployment');
+    }
+    final activeEntrypoints = targets
+        .where((_AssetTarget t) => !t.isManifest)
+        .map((_AssetTarget t) => t.path)
+        .toSet();
+    for (final path in activeEntrypoints) {
+      if (!manifestUrls.contains(path)) {
+        issues.add('$path missing from precache_manifest.json');
+      }
+    }
+    if (activeEntrypoints.isEmpty) return issues;
+    for (final url in manifestUrls) {
+      if (_mainEntrypointPattern.hasMatch(url) &&
+          !activeEntrypoints.contains(url)) {
+        issues.add('$url (stale entrypoint not in flutter_bootstrap.js)');
+      }
+    }
+    return issues;
   }
 
   static String? _validatePrecacheManifestEntry(

@@ -74,6 +74,9 @@ class BuildOptions {
     this.customIndexHtml,
     this.customBootstrapJs,
     this.target,
+    this.relativeOutput = false,
+    this.symlinkOutput = false,
+    this.expandWildcardAssets = false,
     this.extraArgs = const <String>[],
   });
 
@@ -99,6 +102,16 @@ class BuildOptions {
 
   /// Entrypoint passed as `--target` (default `lib/main.dart`).
   final String? target;
+
+  /// Pass `-o` as a path relative to `srcDir` instead of an absolute path.
+  final bool relativeOutput;
+
+  /// Pass `-o` through a symlink pointing at `outDir`.
+  final bool symlinkOutput;
+
+  /// Expand directory-wildcard asset entries in `pubspec.yaml` to explicit
+  /// files so `flutter_assets.d` does not force wildcard reruns.
+  final bool expandWildcardAssets;
   final List<String> extraArgs;
 
   String get key => [
@@ -116,6 +129,9 @@ class BuildOptions {
     if (customBootstrapJs != null)
       'custombootstrap-${sha256.convert(utf8.encode(customBootstrapJs!)).toString().substring(0, 6)}',
     if (target != null) 'target-${target!.split('/').last.split('.').first}',
+    if (relativeOutput) 'relout',
+    if (symlinkOutput) 'symout',
+    if (expandWildcardAssets) 'explicitassets',
     ...extraArgs,
   ].join('_').replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '-');
 }
@@ -199,19 +215,28 @@ class Builder {
   /// [incrementalFrom] reuses that build's source directory (and its
   /// `build/` + `.dart_tool/` state) instead of a fresh copy, i.e. what a
   /// developer's repeated `flutter build web` does.
+  ///
+  /// [workspaceId] isolates the initial directory of a multi-step stateful
+  /// build sequence from shared cached builds, and skips build caching so
+  /// repeated invocations always execute `flutter build web`.
   Future<BuildResult> build(
     FlutterSdk sdk,
     BuildOptions options, {
     BuildResult? incrementalFrom,
+    String? workspaceId,
   }) async {
-    final key =
-        '${sdk.label}__${options.key}${incrementalFrom == null ? '' : '__incr'}';
-    final cached = _cache[key];
-    if (cached != null) return cached;
+    final bool stateful = incrementalFrom != null || workspaceId != null;
+    final String key = workspaceId != null
+        ? '${sdk.label}__ws_$workspaceId'
+        : '${sdk.label}__${options.key}';
+    if (!stateful) {
+      final BuildResult? cached = _cache[key];
+      if (cached != null) return cached;
+    }
 
-    final srcDir =
+    final Directory srcDir =
         incrementalFrom?.srcDir ?? Directory(p.join(workDir.path, 'src', key));
-    final outDir =
+    final Directory outDir =
         incrementalFrom?.outDir ?? Directory(p.join(workDir.path, 'out', key));
     if (incrementalFrom == null) {
       if (srcDir.existsSync()) srcDir.deleteSync(recursive: true);
@@ -220,21 +245,22 @@ class Builder {
     }
     _prepareSourceVariant(srcDir, options);
 
-    final args = _buildFlutterArgs(options, outDir);
-    final started = DateTime.now();
-    final res = await Process.run(
+    final String outArg = _resolveOutputArg(options, srcDir, outDir);
+    final List<String> args = _buildFlutterArgs(options, outArg);
+    final DateTime started = DateTime.now();
+    final ProcessResult res = await Process.run(
       sdk.flutterBin,
       args,
       workingDirectory: srcDir.path,
-      environment: {'FLUTTER_SUPPRESS_ANALYTICS': 'true'},
+      environment: const <String, String>{'FLUTTER_SUPPRESS_ANALYTICS': 'true'},
     );
-    final duration = DateTime.now().difference(started);
+    final Duration duration = DateTime.now().difference(started);
 
     if (res.exitCode == 0 && options.legacyServiceWorker) {
       injectLegacyServiceWorker(outDir);
     }
 
-    final result = BuildResult(
+    final BuildResult result = BuildResult(
       sdk: sdk,
       options: options,
       srcDir: srcDir,
@@ -244,52 +270,149 @@ class Builder {
       stderr: res.stderr as String,
       duration: duration,
     );
-    _cache[key] = result;
+    if (!stateful) {
+      _cache[key] = result;
+    }
     return result;
   }
 
-  static void _prepareSourceVariant(Directory srcDir, BuildOptions options) {
-    for (final rel in ['assets/data/deploy.txt', 'assets/lazy/deploy.txt']) {
-      File(p.join(srcDir.path, rel)).writeAsStringSync('${options.version}\n');
+  void _prepareSourceVariant(Directory srcDir, BuildOptions options) {
+    for (final String rel in const <String>[
+      'assets/data/deploy.txt',
+      'assets/lazy/deploy.txt',
+    ]) {
+      _syncTextFile(File(p.join(srcDir.path, rel)), '${options.version}\n');
     }
-    var variant = Directory(p.join(srcDir.path, 'variants', options.version));
+    Directory variant = Directory(
+      p.join(srcDir.path, 'variants', options.version),
+    );
     if (!variant.existsSync()) {
       variant = Directory(p.join(srcDir.path, 'variants', 'v1'));
     }
-    for (final rel in ['logo.png', '2.0x/logo.png', '3.0x/logo.png']) {
-      File(p.join(variant.path, rel))
-          .copySync(p.join(srcDir.path, 'assets', 'images', rel));
+    for (final String rel in const <String>[
+      'logo.png',
+      '2.0x/logo.png',
+      '3.0x/logo.png',
+    ]) {
+      _copyFileIfChanged(
+        File(p.join(variant.path, rel)),
+        File(p.join(srcDir.path, 'assets', 'images', rel)),
+      );
     }
-    if (options.customIndexHtml != null) {
-      File(p.join(srcDir.path, 'web', 'index.html'))
-          .writeAsStringSync(options.customIndexHtml!);
+    _syncTextFile(
+      File(p.join(srcDir.path, 'web', 'index.html')),
+      options.customIndexHtml,
+      fallbackSource: File(p.join(sampleAppDir.path, 'web', 'index.html')),
+    );
+    _syncTextFile(
+      File(p.join(srcDir.path, 'web', 'flutter_bootstrap.js')),
+      options.customBootstrapJs,
+      fallbackSource: File(
+        p.join(sampleAppDir.path, 'web', 'flutter_bootstrap.js'),
+      ),
+    );
+    final File templatePubspec = File(
+      p.join(sampleAppDir.path, 'pubspec.yaml'),
+    );
+    _syncTextFile(
+      File(p.join(srcDir.path, 'pubspec.yaml')),
+      options.expandWildcardAssets
+          ? _expandSampleAppWildcardAssets(templatePubspec.readAsStringSync())
+          : null,
+      fallbackSource: templatePubspec,
+    );
+  }
+
+  static String _expandSampleAppWildcardAssets(String pubspecContent) =>
+      pubspecContent
+          .replaceFirst(
+            '    - assets/dir/',
+            '    - assets/dir/a.txt\n    - assets/dir/b.txt',
+          )
+          .replaceFirst(
+            '    - assets/lazy/',
+            '    - assets/lazy/deploy.txt\n'
+                '    - assets/lazy/lazy.png\n'
+                '    - assets/lazy/lazy.txt',
+          );
+
+  String _resolveOutputArg(
+    BuildOptions options,
+    Directory srcDir,
+    Directory outDir,
+  ) {
+    String targetPath = outDir.path;
+    if (options.symlinkOutput) {
+      outDir.createSync(recursive: true);
+      final Link link = Link(
+        p.join(workDir.path, 'symlink_out', p.basename(outDir.path)),
+      );
+      if (!link.existsSync()) {
+        link.parent.createSync(recursive: true);
+        link.createSync(outDir.path);
+      }
+      targetPath = link.path;
     }
-    if (options.customBootstrapJs != null) {
-      File(p.join(srcDir.path, 'web', 'flutter_bootstrap.js'))
-          .writeAsStringSync(options.customBootstrapJs!);
+    return options.relativeOutput
+        ? p.relative(targetPath, from: srcDir.path)
+        : targetPath;
+  }
+
+  static void _syncTextFile(
+    File dest,
+    String? desiredContent, {
+    File? fallbackSource,
+  }) {
+    if (desiredContent != null) {
+      if (!dest.existsSync() || dest.readAsStringSync() != desiredContent) {
+        dest.parent.createSync(recursive: true);
+        dest.writeAsStringSync(desiredContent);
+      }
+      return;
+    }
+    if (fallbackSource != null && fallbackSource.existsSync()) {
+      _copyFileIfChanged(fallbackSource, dest);
+    } else if (dest.existsSync()) {
+      dest.deleteSync();
     }
   }
 
-  static List<String> _buildFlutterArgs(
-    BuildOptions options,
-    Directory outDir,
-  ) => <String>[
-    'build',
-    'web',
-    '--no-version-check',
-    if (options.pwaStrategy != 'offline-first')
-      '--pwa-strategy=${options.pwaStrategy}',
-    '--dart-define=APP_VERSION=${options.version}',
-    '-o',
-    outDir.path,
-    if (options.contentHash) '--web-content-hash',
-    if (options.wasm) '--wasm',
-    if (options.sourceMaps) '--source-maps',
-    if (options.baseHref != null) '--base-href=${options.baseHref}',
-    if (options.flavor != null) '--flavor=${options.flavor}',
-    if (options.target != null) '--target=${options.target}',
-    ...options.extraArgs,
-  ];
+  static void _copyFileIfChanged(File src, File dest) {
+    final List<int> srcBytes = src.readAsBytesSync();
+    if (dest.existsSync()) {
+      final List<int> destBytes = dest.readAsBytesSync();
+      if (_bytesEqual(srcBytes, destBytes)) return;
+    }
+    dest.parent.createSync(recursive: true);
+    dest.writeAsBytesSync(srcBytes);
+  }
+
+  static bool _bytesEqual(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  static List<String> _buildFlutterArgs(BuildOptions options, String outArg) =>
+      <String>[
+        'build',
+        'web',
+        '--no-version-check',
+        if (options.pwaStrategy != 'offline-first')
+          '--pwa-strategy=${options.pwaStrategy}',
+        '--dart-define=APP_VERSION=${options.version}',
+        '-o',
+        outArg,
+        if (options.contentHash) '--web-content-hash',
+        if (options.wasm) '--wasm',
+        if (options.sourceMaps) '--source-maps',
+        if (options.baseHref != null) '--base-href=${options.baseHref}',
+        if (options.flavor != null) '--flavor=${options.flavor}',
+        if (options.target != null) '--target=${options.target}',
+        ...options.extraArgs,
+      ];
 
   /// Copies `sample_app` and its sibling `sample_pkg` (path dependency) so
   /// the copy resolves without touching the checked-in tree.

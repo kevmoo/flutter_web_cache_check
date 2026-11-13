@@ -196,6 +196,7 @@ void main() {
   _registerW02Tests();
   _registerE02Tests();
   _registerF08Tests();
+  _registerMissingBootloaderTests();
 }
 
 void _registerW01Tests() {
@@ -651,5 +652,225 @@ void _registerF08Tests() {
         );
       },
     );
+
+    test('fails F-08 when stale precache_manifest.json lingers on an unhashed '
+        'deployment', () async {
+      final unhashedWithStaleManifest = MockClient((
+        http.Request request,
+      ) async {
+        final path = request.url.path;
+        if (path == '/index.html' || path == '/') {
+          return http.Response(
+            '<html></html>',
+            request.headers['if-none-match'] == '"v2"' ? 304 : 200,
+            headers: <String, String>{
+              'cache-control': 'max-age=0, must-revalidate',
+              'etag': '"v2"',
+            },
+          );
+        }
+        if (path == '/flutter_bootstrap.js') {
+          return http.Response(
+            '_flutter.buildConfig = {"builds": [ '
+            '{"compileTarget": "dart2js", "mainJsPath": "main.dart.js"}]};',
+            200,
+            headers: <String, String>{
+              'cache-control': 'max-age=0, must-revalidate',
+              'content-type': 'text/javascript',
+            },
+          );
+        }
+        if (path == '/main.dart.js') {
+          return http.Response(
+            'console.log("unhashed");',
+            200,
+            headers: <String, String>{
+              'cache-control': 'max-age=0, must-revalidate',
+              'content-type': 'application/javascript',
+            },
+          );
+        }
+        if (path == '/precache_manifest.json') {
+          return http.Response(
+            '{"version":1,"entries":['
+            '{"url":"main.dart.785ea741.js","hash":"785ea741",'
+            '"size":19,"urlHashed":true}]}',
+            200,
+            headers: <String, String>{
+              'cache-control': 'max-age=0, must-revalidate',
+              'content-type': 'application/json',
+            },
+          );
+        }
+        return http.Response(
+          'Not Found',
+          404,
+          headers: <String, String>{
+            'cache-control': 'max-age=0, must-revalidate',
+          },
+        );
+      });
+
+      final report = await UrlChecker(
+        'https://example.com',
+        client: unhashedWithStaleManifest,
+        requireWasm: false,
+        minCompressionBytes: 100000,
+      ).analyze();
+
+      expect(report.hasFailures, isTrue);
+      expect(
+        report.findings.any(
+          (CheckFinding f) =>
+              f.ruleId == 'F-08' &&
+              f.path == 'precache_manifest.json' &&
+              f.severity == Severity.fail &&
+              f.message.contains('unhashed deployment') &&
+              f.message.contains('main.dart.js missing') &&
+              f.message.contains('main.dart.785ea741.js'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('fails F-08 when precache_manifest.json lists stale main.dart.* '
+        'entrypoints not in flutter_bootstrap.js', () async {
+      const manifestWithStaleEntrypoint = '''
+{
+  "version": 1,
+  "entries": [
+    {"url": "main.dart.5f77f974.wasm", "hash": "5f77f974", "size": 8, "urlHashed": true},
+    {"url": "main.dart.db41cfdb.mjs", "hash": "db41cfdb", "size": 36, "urlHashed": true},
+    {"url": "main.dart.785ea741.js", "hash": "785ea741", "size": 19, "urlHashed": true},
+    {"url": "main.dart.deadbeef.js", "hash": "deadbeef", "size": 19, "urlHashed": true}
+  ]
+}
+''';
+      final report = await UrlChecker(
+        'https://example.com',
+        client: _buildPrecacheManifestClient(
+          manifestBody: manifestWithStaleEntrypoint,
+        ),
+        minCompressionBytes: 100000,
+      ).analyze();
+
+      expect(
+        report.findings.any(
+          (CheckFinding f) =>
+              f.ruleId == 'F-08' &&
+              f.path == 'precache_manifest.json' &&
+              f.severity == Severity.fail &&
+              f.message.contains('main.dart.deadbeef.js (stale entrypoint'),
+        ),
+        isTrue,
+      );
+    });
   });
+}
+
+void _registerMissingBootloaderTests() {
+  group(
+    'F-01 & F-02: Missing index.html and flutter_bootstrap.js deployments',
+    () {
+      test('fails F-01 and F-02 when both index.html (and /) and '
+          'flutter_bootstrap.js return 404', () async {
+        final missingBootloadersClient = MockClient(
+          (http.Request request) async => http.Response(
+            'Not Found',
+            404,
+            headers: <String, String>{
+              'cache-control': 'max-age=0, must-revalidate',
+            },
+          ),
+        );
+
+        final report = await UrlChecker(
+          'https://example.com',
+          client: missingBootloadersClient,
+          minCompressionBytes: 100000,
+        ).analyze();
+
+        expect(report.hasFailures, isTrue);
+        expect(
+          report.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'F-01' &&
+                f.path == '/' &&
+                f.severity == Severity.fail &&
+                f.message.contains('404'),
+          ),
+          isTrue,
+        );
+        expect(
+          report.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'F-02' &&
+                f.path == 'flutter_bootstrap.js' &&
+                f.severity == Severity.fail &&
+                f.message.contains('404'),
+          ),
+          isTrue,
+        );
+        expect(
+          report.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'R-01' || f.ruleId == 'R-02' || f.ruleId == 'W-01',
+          ),
+          isFalse,
+        );
+      });
+
+      test('falls back from 404 /index.html to 200 / while failing F-02 on 404 '
+          'flutter_bootstrap.js', () async {
+        final rootOnlyMissingBootstrapClient = MockClient((
+          http.Request request,
+        ) async {
+          if (request.url.path == '/') {
+            return http.Response(
+              '<html></html>',
+              request.headers['if-none-match'] == '"root-v1"' ? 304 : 200,
+              headers: <String, String>{
+                'cache-control': 'max-age=0, must-revalidate',
+                'etag': '"root-v1"',
+              },
+            );
+          }
+          return http.Response(
+            'Not Found',
+            404,
+            headers: <String, String>{
+              'cache-control': 'max-age=0, must-revalidate',
+            },
+          );
+        });
+
+        final report = await UrlChecker(
+          'https://example.com',
+          client: rootOnlyMissingBootstrapClient,
+          minCompressionBytes: 100000,
+        ).analyze();
+
+        expect(report.hasFailures, isTrue);
+        expect(
+          report.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'F-01' &&
+                f.path == '/' &&
+                f.severity == Severity.ok,
+          ),
+          isTrue,
+        );
+        expect(
+          report.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'F-02' &&
+                f.path == 'flutter_bootstrap.js' &&
+                f.severity == Severity.fail &&
+                f.message.contains('404'),
+          ),
+          isTrue,
+        );
+      });
+    },
+  );
 }
