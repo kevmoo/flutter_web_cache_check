@@ -1,5 +1,6 @@
 export 'src/builder.dart';
 export 'src/chrome.dart';
+export 'src/entrypoints.dart';
 export 'src/hosting.dart';
 export 'src/legacy_sw.dart';
 export 'src/scenario.dart';

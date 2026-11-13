@@ -544,7 +544,8 @@ void _registerF08Tests() {
     {"url": "flutter_bootstrap.js", "hash": "22222222", "size": 100, "urlHashed": false},
     {"url": "main.dart.5f77f974.wasm", "hash": "5f77f974", "size": 8, "urlHashed": true},
     {"url": "main.dart.db41cfdb.mjs", "hash": "db41cfdb", "size": 36, "urlHashed": true},
-    {"url": "main.dart.785ea741.js", "hash": "785ea741", "size": 19, "urlHashed": true}
+    {"url": "main.dart.785ea741.js", "hash": "785ea741", "size": 19, "urlHashed": true},
+    {"url": "assets/images/logo.342887cc.png", "hash": "342887cc", "size": 42, "urlHashed": true}
   ]
 }
 ''';
@@ -583,7 +584,8 @@ void _registerF08Tests() {
   "entries": [
     {"url": "main.dart.5f77f974.wasm", "hash": "5f77f974", "size": 8, "urlHashed": true},
     {"url": "main.dart.db41cfdb.mjs", "hash": "b8c4bc7f", "size": 36, "urlHashed": false},
-    {"url": "main.dart.785ea741.js", "hash": "fca793b5", "size": 19, "urlHashed": false}
+    {"url": "main.dart.785ea741.js", "hash": "fca793b5", "size": 19, "urlHashed": false},
+    {"url": "assets/images/logo.342887cc.png/", "hash": "00000000", "size": 42, "urlHashed": false}
   ]
 }
 ''';
@@ -602,7 +604,8 @@ void _registerF08Tests() {
               f.path == 'precache_manifest.json' &&
               f.severity == Severity.fail &&
               f.message.contains('main.dart.785ea741.js') &&
-              f.message.contains('main.dart.db41cfdb.mjs'),
+              f.message.contains('main.dart.db41cfdb.mjs') &&
+              f.message.contains('assets/images/logo.342887cc.png/'),
         ),
         isTrue,
       );

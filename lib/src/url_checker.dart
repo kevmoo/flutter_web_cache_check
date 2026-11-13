@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 
 enum Severity {
   ok,
@@ -804,7 +805,7 @@ class UrlChecker {
       if (_isExcludedPrecacheArtifact(cleanUrl)) {
         return '$cleanUrl (non-runtime artifact must be excluded)';
       }
-      final basename = cleanUrl.split('/').last;
+      final basename = p.url.basename(cleanUrl);
       final hashMatchesFilename =
           basename.contains('.$rawHash.') || basename.endsWith('.$rawHash');
       final hasFilenameHash = _hashedEntryFilenamePattern.hasMatch(basename);

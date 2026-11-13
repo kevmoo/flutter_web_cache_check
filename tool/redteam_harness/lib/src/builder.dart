@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import 'entrypoints.dart';
 import 'legacy_sw.dart';
 
 /// A Flutter SDK checkout to build with.
@@ -128,7 +129,7 @@ class BuildOptions {
       'customindex-${sha256.convert(utf8.encode(customIndexHtml!)).toString().substring(0, 6)}',
     if (customBootstrapJs != null)
       'custombootstrap-${sha256.convert(utf8.encode(customBootstrapJs!)).toString().substring(0, 6)}',
-    if (target != null) 'target-${target!.split('/').last.split('.').first}',
+    if (target != null) 'target-${p.basenameWithoutExtension(target!)}',
     if (relativeOutput) 'relout',
     if (symlinkOutput) 'symout',
     if (expandWildcardAssets) 'explicitassets',
@@ -177,11 +178,7 @@ class BuildResult {
           .listSync()
           .whereType<File>()
           .map((f) => p.basename(f.path))
-          .where(
-            (n) =>
-                RegExp(r'^main\.dart(\.[a-f0-9]{8})?\.(js|wasm|mjs)$')
-                    .hasMatch(n),
-          )
+          .where(isMainEntrypoint)
           .toList()
         ..sort();
 
