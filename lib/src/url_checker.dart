@@ -69,16 +69,16 @@ class CacheDirectives {
     if (header == null || header.trim().isEmpty) {
       return const CacheDirectives();
     }
-    final Map<String, String?> raw = <String, String?>{};
-    for (final String part in _splitCommaOutsideQuotes(header)) {
-      final String token = part.trim();
+    final raw = <String, String?>{};
+    for (final part in _splitCommaOutsideQuotes(header)) {
+      final token = part.trim();
       if (token.isEmpty) continue;
-      final int eqIdx = token.indexOf('=');
+      final eqIdx = token.indexOf('=');
       if (eqIdx == -1) {
         raw[token.toLowerCase()] = null;
       } else {
-        final String key = token.substring(0, eqIdx).trim().toLowerCase();
-        String val = token.substring(eqIdx + 1).trim();
+        final key = token.substring(0, eqIdx).trim().toLowerCase();
+        var val = token.substring(eqIdx + 1).trim();
         if (val.length >= 2 && val.startsWith('"') && val.endsWith('"')) {
           val = val.substring(1, val.length - 1).replaceAll(r'\"', '"');
         }
@@ -100,12 +100,12 @@ class CacheDirectives {
   }
 
   static List<String> _splitCommaOutsideQuotes(String input) {
-    final List<String> parts = <String>[];
-    final StringBuffer current = StringBuffer();
-    bool inQuotes = false;
-    bool escaped = false;
-    for (int i = 0; i < input.length; i++) {
-      final String ch = input[i];
+    final parts = <String>[];
+    final current = StringBuffer();
+    var inQuotes = false;
+    var escaped = false;
+    for (var i = 0; i < input.length; i++) {
+      final ch = input[i];
       if (escaped) {
         current.write(ch);
         escaped = false;
@@ -150,7 +150,7 @@ class CacheDirectives {
       (noCache || noStore || (maxAge != null && maxAge! <= 0));
 
   bool get isSharedEdgeRevalidatingOrZero {
-    final int? effectiveTtl = sMaxAge ?? maxAge;
+    final effectiveTtl = sMaxAge ?? maxAge;
     return !immutable &&
         (maxAge == null ||
             maxAge! <= 0 ||
@@ -204,13 +204,13 @@ class UrlChecker {
     HostPlatform platform = HostPlatform.auto,
     bool requireWasm = true,
   }) async {
-    final UrlChecker checker = UrlChecker(
+    final checker = UrlChecker(
       targetUrl,
       verbose: verbose,
       platform: platform,
       requireWasm: requireWasm,
     );
-    final int code = await checker.run();
+    final code = await checker.run();
     if (code != 0) {
       exit(code);
     }
@@ -218,10 +218,10 @@ class UrlChecker {
 
   Future<int> run() async {
     print('🔍 Inspecting deployed Flutter web app at: $targetUrl');
-    final CheckReport report = await analyze();
+    final report = await analyze();
     print('🌐 Detected platform: ${report.detectedPlatform.name}');
-    for (final CheckFinding finding in report.findings) {
-      final String icon = switch (finding.severity) {
+    for (final finding in report.findings) {
+      final icon = switch (finding.severity) {
         Severity.ok => '✅ [PASS]',
         Severity.warn => '⚠️ [WARN]',
         Severity.fail => '❌ [FAIL]',
@@ -240,9 +240,9 @@ class UrlChecker {
 
   Future<CheckReport> analyze() async {
     try {
-      final Uri baseUri = _normalizeBaseUri(targetUrl);
-      final List<CheckFinding> findings = <CheckFinding>[];
-      HostPlatform detectedPlatform = platform == HostPlatform.auto
+      final baseUri = _normalizeBaseUri(targetUrl);
+      final findings = <CheckFinding>[];
+      var detectedPlatform = platform == HostPlatform.auto
           ? HostPlatform.generic
           : platform;
 
@@ -276,7 +276,7 @@ class UrlChecker {
   }
 
   static Uri _normalizeBaseUri(String rawUrl) {
-    String normalized = rawUrl.trim();
+    var normalized = rawUrl.trim();
     if (normalized.endsWith('/index.html')) {
       normalized = normalized.substring(
         0,
@@ -293,7 +293,7 @@ class UrlChecker {
     Map<String, String> headers,
   ) {
     if (platform != HostPlatform.auto) return platform;
-    final String vary = (headers['vary'] ?? '').toLowerCase();
+    final vary = (headers['vary'] ?? '').toLowerCase();
     if (vary.contains('x-fh-requested-host')) {
       return HostPlatform.firebase;
     }
@@ -302,8 +302,7 @@ class UrlChecker {
 
   static bool _isHtmlSpaFallback(http.Response resp) {
     if (resp.statusCode != 200) return false;
-    final String contentType = (resp.headers['content-type'] ?? '')
-        .toLowerCase();
+    final contentType = (resp.headers['content-type'] ?? '').toLowerCase();
     return contentType.contains('text/html') ||
         contentType.contains('application/xhtml+xml');
   }
@@ -313,10 +312,10 @@ class UrlChecker {
     required http.Response resp,
     required List<CheckFinding> findings,
   }) {
-    final String contentType = (resp.headers['content-type'] ?? '')
-        .toLowerCase();
-    final String wasmDetail = path.endsWith('.wasm')
-        ? ' Missing .wasm requests rewritten to HTML (0x3c21444f / <!DO) break WebAssembly.compileStreaming().'
+    final contentType = (resp.headers['content-type'] ?? '').toLowerCase();
+    final wasmDetail = path.endsWith('.wasm')
+        ? ' Missing .wasm requests rewritten to HTML (0x3c21444f / <!DO) '
+              'break WebAssembly.compileStreaming().'
         : '';
     findings.add(
       CheckFinding(
@@ -324,7 +323,10 @@ class UrlChecker {
         severity: Severity.fail,
         path: path,
         message:
-            'SPA catch-all rewrite poisoning: $path returned HTTP ${resp.statusCode} ($contentType) with Cache-Control "${resp.headers['cache-control']}".$wasmDetail Exclude static asset paths from SPA rewrites.',
+            'SPA catch-all rewrite poisoning: $path returned HTTP '
+            '${resp.statusCode} ($contentType) with Cache-Control '
+            '"${resp.headers['cache-control']}".$wasmDetail Exclude static '
+            'asset paths from SPA rewrites.',
       ),
     );
   }
@@ -334,18 +336,15 @@ class UrlChecker {
     required HostPlatform currentPlatform,
     required List<CheckFinding> findings,
   }) async {
-    Uri indexUri = baseUri.resolve('index.html');
-    String indexLabel = 'index.html';
-    http.Response indexResp = await _client.get(indexUri);
+    var indexUri = baseUri.resolve('index.html');
+    var indexLabel = 'index.html';
+    var indexResp = await _client.get(indexUri);
     if (indexResp.statusCode == 404) {
       indexUri = baseUri.resolve('./');
       indexLabel = '/';
       indexResp = await _client.get(indexUri);
     }
-    final HostPlatform detected = _detectPlatform(
-      currentPlatform,
-      indexResp.headers,
-    );
+    final detected = _detectPlatform(currentPlatform, indexResp.headers);
 
     _evaluateRootResponse(
       resp: indexResp,
@@ -372,22 +371,24 @@ class UrlChecker {
     required http.Response indexResp,
     required List<CheckFinding> findings,
   }) async {
-    final String? etag = indexResp.headers['etag'];
-    final String? lastModified = indexResp.headers['last-modified'];
+    final etag = indexResp.headers['etag'];
+    final lastModified = indexResp.headers['last-modified'];
     if (etag == null && lastModified == null) {
       findings.add(
         CheckFinding(
           ruleId: 'R-01',
           severity: Severity.warn,
           path: indexLabel,
-          message: 'Missing ETag and Last-Modified validators; browsers cannot perform 304 conditional revalidation.',
+          message:
+              'Missing ETag and Last-Modified validators; browsers cannot '
+              'perform 304 conditional revalidation.',
         ),
       );
       return;
     }
     if (etag == null) return;
 
-    http.Response condResp = await _client.get(
+    var condResp = await _client.get(
       indexUri,
       headers: <String, String>{'If-None-Match': etag},
     );
@@ -416,7 +417,9 @@ class UrlChecker {
           severity: Severity.ok,
           path: indexLabel,
           message:
-              'Local Firebase superstatic emulator emitted unquoted ETag ($etag); production Firebase Hosting CDN serves standard 304 Not Modified.',
+              'Local Firebase superstatic emulator emitted unquoted ETag '
+              '($etag); production Firebase Hosting CDN serves standard 304 '
+              'Not Modified.',
         ),
       );
     } else if (condResp.statusCode == 200) {
@@ -426,7 +429,8 @@ class UrlChecker {
           severity: Severity.warn,
           path: indexLabel,
           message:
-              'Conditional GET with If-None-Match: $etag returned 200 OK instead of 304 Not Modified.',
+              'Conditional GET with If-None-Match: $etag returned 200 OK '
+              'instead of 304 Not Modified.',
         ),
       );
     }
@@ -437,12 +441,9 @@ class UrlChecker {
     required HostPlatform currentPlatform,
     required List<CheckFinding> findings,
   }) async {
-    final Uri bootstrapUri = baseUri.resolve('flutter_bootstrap.js');
-    final http.Response bootstrapResp = await _client.get(bootstrapUri);
-    HostPlatform detected = _detectPlatform(
-      currentPlatform,
-      bootstrapResp.headers,
-    );
+    final bootstrapUri = baseUri.resolve('flutter_bootstrap.js');
+    final bootstrapResp = await _client.get(bootstrapUri);
+    var detected = _detectPlatform(currentPlatform, bootstrapResp.headers);
 
     if (_isHtmlSpaFallback(bootstrapResp)) {
       _recordSpaFallbackFinding(
@@ -450,12 +451,11 @@ class UrlChecker {
         resp: bootstrapResp,
         findings: findings,
       );
-      detected = await _probeDefaultUnhashedManifest(
+      return _probeDefaultUnhashedManifest(
         baseUri: baseUri,
         currentPlatform: detected,
         findings: findings,
       );
-      return detected;
     }
 
     _evaluateRootResponse(
@@ -472,10 +472,10 @@ class UrlChecker {
 
     _evaluateWasmBuildTarget(bootstrapResp.body, findings);
 
-    final List<_AssetTarget> targets = _extractTargets(bootstrapResp.body);
-    final bool sawManifest = targets.any((_AssetTarget t) => t.isManifest);
+    final targets = _extractTargets(bootstrapResp.body);
+    final sawManifest = targets.any((_AssetTarget t) => t.isManifest);
 
-    for (final _AssetTarget target in targets) {
+    for (final target in targets) {
       detected = await _probeAssetTarget(
         baseUri: baseUri,
         target: target,
@@ -492,14 +492,12 @@ class UrlChecker {
       );
     }
 
-    detected = await _probePrecacheManifest(
+    return _probePrecacheManifest(
       baseUri: baseUri,
       targets: targets,
       currentPlatform: detected,
       findings: findings,
     );
-
-    return detected;
   }
 
   static String _stripJsComments(String source) => source
@@ -510,28 +508,27 @@ class UrlChecker {
     String bootstrapBody,
     List<CheckFinding> findings,
   ) {
-    final String stripped = _stripJsComments(bootstrapBody);
-    final RegExp wasmPathReg = RegExp(r'"mainWasmPath"\s*:\s*"([^"]*)"');
+    final stripped = _stripJsComments(bootstrapBody);
+    final wasmPathReg = RegExp(r'"mainWasmPath"\s*:\s*"([^"]*)"');
     final Match? wasmMatch = wasmPathReg.firstMatch(stripped);
-    final String? mainWasmPath = wasmMatch?.group(1)?.trim();
-    final bool hasNonEmptyWasmPath =
-        mainWasmPath != null && mainWasmPath.isNotEmpty;
-    final bool hasExplicitEmptyWasmPath =
-        wasmMatch != null && !hasNonEmptyWasmPath;
-    final bool hasDart2Wasm =
+    final mainWasmPath = wasmMatch?.group(1)?.trim();
+    final hasNonEmptyWasmPath = mainWasmPath != null && mainWasmPath.isNotEmpty;
+    final hasExplicitEmptyWasmPath = wasmMatch != null && !hasNonEmptyWasmPath;
+    final hasDart2Wasm =
         hasNonEmptyWasmPath ||
         (!hasExplicitEmptyWasmPath &&
             RegExp(r'"compileTarget"\s*:\s*"dart2wasm"').hasMatch(stripped));
 
     if (hasDart2Wasm) {
-      final String label = hasNonEmptyWasmPath ? mainWasmPath : 'dart2wasm';
+      final label = hasNonEmptyWasmPath ? mainWasmPath : 'dart2wasm';
       findings.add(
         CheckFinding(
           ruleId: 'W-01',
           severity: Severity.ok,
           path: 'flutter_bootstrap.js',
           message:
-              'WebAssembly (dart2wasm) build target detected in flutter_bootstrap.js ($label).',
+              'WebAssembly (dart2wasm) build target detected in '
+              'flutter_bootstrap.js ($label).',
         ),
       );
     } else if (requireWasm) {
@@ -540,7 +537,11 @@ class UrlChecker {
           ruleId: 'W-01',
           severity: Severity.warn,
           path: 'flutter_bootstrap.js',
-          message: 'No WebAssembly (dart2wasm) build target detected in flutter_bootstrap.js. Build with "flutter build web --wasm --web-content-hash" (or pass --no-wasm if intentionally JS-only).',
+          message:
+              'No WebAssembly (dart2wasm) build target detected in '
+              'flutter_bootstrap.js. Build with '
+              '"flutter build web --wasm --web-content-hash" '
+              '(or pass --no-wasm if intentionally JS-only).',
         ),
       );
     } else {
@@ -549,7 +550,9 @@ class UrlChecker {
           ruleId: 'W-01',
           severity: Severity.ok,
           path: 'flutter_bootstrap.js',
-          message: 'JS-only build target in flutter_bootstrap.js allowed via --no-wasm.',
+          message:
+              'JS-only build target in flutter_bootstrap.js allowed via '
+              '--no-wasm.',
         ),
       );
     }
@@ -561,11 +564,8 @@ class UrlChecker {
     required HostPlatform currentPlatform,
     required List<CheckFinding> findings,
   }) async {
-    final http.Response resp = await _client.get(baseUri.resolve(target.path));
-    final HostPlatform detected = _detectPlatform(
-      currentPlatform,
-      resp.headers,
-    );
+    final resp = await _client.get(baseUri.resolve(target.path));
+    final detected = _detectPlatform(currentPlatform, resp.headers);
 
     if (resp.statusCode >= 400) {
       findings.add(
@@ -620,9 +620,7 @@ class UrlChecker {
     required String ruleId,
     required List<CheckFinding> findings,
   }) {
-    final CacheDirectives cc = CacheDirectives.parse(
-      resp.headers['cache-control'],
-    );
+    final cc = CacheDirectives.parse(resp.headers['cache-control']);
     if (!cc.isRevalidatingOrZero || !_isSharedEdgeRootCacheOk(resp, cc)) {
       findings.add(
         CheckFinding(
@@ -630,7 +628,10 @@ class UrlChecker {
           severity: Severity.fail,
           path: path,
           message:
-              'Unhashed $label ($path) is cached with "${resp.headers['cache-control']}" (CDN-Cache-Control: "${resp.headers['cdn-cache-control']}"). Must revalidate (max-age=0, must-revalidate).',
+              'Unhashed $label ($path) is cached with '
+              '"${resp.headers['cache-control']}" (CDN-Cache-Control: '
+              '"${resp.headers['cdn-cache-control']}"). Must revalidate '
+              '(max-age=0, must-revalidate).',
         ),
       );
     } else {
@@ -650,14 +651,11 @@ class UrlChecker {
     required HostPlatform currentPlatform,
     required List<CheckFinding> findings,
   }) async {
-    const String defaultManifestPath = 'assets/AssetManifest.bin.json';
-    final http.Response manifestResp = await _client.get(
+    const defaultManifestPath = 'assets/AssetManifest.bin.json';
+    final manifestResp = await _client.get(
       baseUri.resolve(defaultManifestPath),
     );
-    final HostPlatform detected = _detectPlatform(
-      currentPlatform,
-      manifestResp.headers,
-    );
+    final detected = _detectPlatform(currentPlatform, manifestResp.headers);
     if (manifestResp.statusCode != 200) {
       return detected;
     }
@@ -685,14 +683,11 @@ class UrlChecker {
     required HostPlatform currentPlatform,
     required List<CheckFinding> findings,
   }) async {
-    const String precacheManifestPath = 'precache_manifest.json';
-    final http.Response manifestResp = await _client.get(
+    const precacheManifestPath = 'precache_manifest.json';
+    final manifestResp = await _client.get(
       baseUri.resolve(precacheManifestPath),
     );
-    final HostPlatform detected = _detectPlatform(
-      currentPlatform,
-      manifestResp.headers,
-    );
+    final detected = _detectPlatform(currentPlatform, manifestResp.headers);
     if (manifestResp.statusCode != 200 || _isHtmlSpaFallback(manifestResp)) {
       return detected;
     }
@@ -726,21 +721,18 @@ class UrlChecker {
     required List<_AssetTarget> targets,
     required List<CheckFinding> findings,
   }) {
-    final List<String> issues = <String>[];
-    final Set<String> manifestUrls = <String>{};
+    final issues = <String>[];
+    final manifestUrls = <String>{};
 
-    for (final Object? rawEntry in entries) {
+    for (final rawEntry in entries) {
       if (rawEntry is! Map<String, Object?>) continue;
-      final String? issue = _validatePrecacheManifestEntry(
-        rawEntry,
-        manifestUrls,
-      );
+      final issue = _validatePrecacheManifestEntry(rawEntry, manifestUrls);
       if (issue != null) {
         issues.add(issue);
       }
     }
 
-    for (final _AssetTarget target in targets) {
+    for (final target in targets) {
       if (target.isHashed &&
           !target.isManifest &&
           !manifestUrls.contains(target.path)) {
@@ -755,7 +747,8 @@ class UrlChecker {
           severity: Severity.fail,
           path: 'precache_manifest.json',
           message:
-              'Invalid precache_manifest.json entries: ${issues.take(5).join(', ')}.',
+              'Invalid precache_manifest.json entries: '
+              '${issues.take(5).join(', ')}.',
         ),
       );
     } else {
@@ -764,7 +757,9 @@ class UrlChecker {
           ruleId: 'F-08',
           severity: Severity.ok,
           path: 'precache_manifest.json',
-          message: 'All entries in precache_manifest.json have consistent content hashes and urlHashed flags.',
+          message:
+              'All entries in precache_manifest.json have consistent content '
+              'hashes and urlHashed flags.',
         ),
       );
     }
@@ -779,17 +774,15 @@ class UrlChecker {
       'hash': final String rawHash,
       'urlHashed': final bool rawUrlHashed,
     }) {
-      final String cleanUrl = _normalizeRelativePath(rawUrl);
+      final cleanUrl = _normalizeRelativePath(rawUrl);
       manifestUrls.add(cleanUrl);
       if (_isExcludedPrecacheArtifact(cleanUrl)) {
         return '$cleanUrl (non-runtime artifact must be excluded)';
       }
-      final String basename = cleanUrl.split('/').last;
-      final bool hashMatchesFilename =
+      final basename = cleanUrl.split('/').last;
+      final hashMatchesFilename =
           basename.contains('.$rawHash.') || basename.endsWith('.$rawHash');
-      final bool hasFilenameHash = _hashedEntryFilenamePattern.hasMatch(
-        basename,
-      );
+      final hasFilenameHash = _hashedEntryFilenamePattern.hasMatch(basename);
       if (rawUrlHashed != hashMatchesFilename ||
           (hasFilenameHash && !rawUrlHashed)) {
         return '$cleanUrl (hash=$rawHash, urlHashed=$rawUrlHashed)';
@@ -809,16 +802,14 @@ class UrlChecker {
     required HostPlatform currentPlatform,
     required List<CheckFinding> findings,
   }) async {
-    const List<String> missingProbes = <String>[
+    const missingProbes = <String>[
       'main.dart.00000000.js',
       'main.dart.00000000.wasm',
       'assets/__cache_check_missing__.00000000.png',
     ];
-    HostPlatform detected = currentPlatform;
-    for (final String probePath in missingProbes) {
-      final http.Response probeResp = await _client.get(
-        baseUri.resolve(probePath),
-      );
+    var detected = currentPlatform;
+    for (final probePath in missingProbes) {
+      final probeResp = await _client.get(baseUri.resolve(probePath));
       detected = _detectPlatform(detected, probeResp.headers);
       _evaluateMissingProbeResponse(
         baseUri: baseUri,
@@ -838,8 +829,7 @@ class UrlChecker {
     required HostPlatform detectedPlatform,
     required List<CheckFinding> findings,
   }) {
-    final String contentType = (probeResp.headers['content-type'] ?? '')
-        .toLowerCase();
+    final contentType = (probeResp.headers['content-type'] ?? '').toLowerCase();
     if (probeResp.statusCode == 200 ||
         (probeResp.statusCode != 404 && contentType.contains('text/html'))) {
       _recordSpaFallbackFinding(
@@ -885,23 +875,27 @@ class UrlChecker {
       return;
     }
 
-    final String? rawCc = resp.headers['cache-control'];
+    final rawCc = resp.headers['cache-control'];
     if (rawCc == null || rawCc.trim().isEmpty) {
       findings.add(
         CheckFinding(
           ruleId: ruleId,
           severity: Severity.fail,
           path: label,
-          message: 'Missing Cache-Control header! Must be max-age=0, must-revalidate (or no-cache).',
+          message:
+              'Missing Cache-Control header! Must be max-age=0, '
+              'must-revalidate (or no-cache).',
         ),
       );
       return;
     }
 
-    final CacheDirectives cc = CacheDirectives.parse(rawCc);
+    final cc = CacheDirectives.parse(rawCc);
     if (!cc.isRevalidatingOrZero || !_isSharedEdgeRootCacheOk(resp, cc)) {
-      final String fbPrescription = detectedPlatform == HostPlatform.firebase
-          ? ' On Firebase Hosting, add a {"source": "**"} rule with "max-age=0, must-revalidate" to override the 3600s default while keeping Fastly edge 304s.'
+      final fbPrescription = detectedPlatform == HostPlatform.firebase
+          ? ' On Firebase Hosting, add a {"source": "**"} rule with '
+                '"max-age=0, must-revalidate" to override the 3600s default '
+                'while keeping Fastly edge 304s.'
           : '';
       findings.add(
         CheckFinding(
@@ -909,7 +903,9 @@ class UrlChecker {
           severity: Severity.fail,
           path: label,
           message:
-              'Risky caching headers on root $label (Cache-Control: "$rawCc", CDN-Cache-Control: "${resp.headers['cdn-cache-control']}"). Both browser and shared CDN TTL must be <= 0.$fbPrescription',
+              'Risky caching headers on root $label (Cache-Control: "$rawCc", '
+              'CDN-Cache-Control: "${resp.headers['cdn-cache-control']}"). '
+              'Both browser and shared CDN TTL must be <= 0.$fbPrescription',
         ),
       );
       return;
@@ -931,14 +927,18 @@ class UrlChecker {
           ruleId: 'F-12',
           severity: Severity.warn,
           path: label,
-          message: 'Firebase Hosting Fastly VCL executes return(pass) when Cache-Control contains no-cache, no-store, or private, disabling edge 304 caching. Prefer "max-age=0, must-revalidate".',
+          message:
+              'Firebase Hosting Fastly VCL executes return(pass) when '
+              'Cache-Control contains no-cache, no-store, or private, '
+              'disabling edge 304 caching. Prefer '
+              '"max-age=0, must-revalidate".',
         ),
       );
     }
   }
 
   static bool _isSharedEdgeRootCacheOk(http.Response resp, CacheDirectives cc) {
-    final String? rawCdn =
+    final rawCdn =
         resp.headers['cdn-cache-control'] ?? resp.headers['surrogate-control'];
     if (rawCdn != null) {
       return CacheDirectives.parse(rawCdn).isSharedEdgeRevalidatingOrZero;
@@ -952,20 +952,22 @@ class UrlChecker {
     required String ruleId,
     required List<CheckFinding> findings,
   }) {
-    final String? rawCc = resp.headers['cache-control'];
+    final rawCc = resp.headers['cache-control'];
     if (rawCc == null || rawCc.trim().isEmpty) {
       findings.add(
         CheckFinding(
           ruleId: ruleId,
           severity: Severity.fail,
           path: path,
-          message: 'Missing Cache-Control header on hashed asset! Expected "public, max-age=31536000, immutable".',
+          message:
+              'Missing Cache-Control header on hashed asset! Expected '
+              '"public, max-age=31536000, immutable".',
         ),
       );
       return;
     }
 
-    final CacheDirectives cc = CacheDirectives.parse(rawCc);
+    final cc = CacheDirectives.parse(rawCc);
     if (cc.noCache ||
         cc.noStore ||
         cc.privateDirective ||
@@ -978,7 +980,8 @@ class UrlChecker {
           severity: Severity.fail,
           path: path,
           message:
-              'Hashed asset $path has insufficient or private caching ("$rawCc"). Expected "public, max-age=31536000, immutable".',
+              'Hashed asset $path has insufficient or private caching '
+              '("$rawCc"). Expected "public, max-age=31536000, immutable".',
         ),
       );
       return;
@@ -991,7 +994,9 @@ class UrlChecker {
           severity: Severity.warn,
           path: path,
           message:
-              'Hashed asset $path has max-age=${cc.maxAge} but is missing "immutable" ("$rawCc"). Add "immutable" to skip reload revalidation.',
+              'Hashed asset $path has max-age=${cc.maxAge} but is missing '
+              '"immutable" ("$rawCc"). Add "immutable" to skip reload '
+              'revalidation.',
         ),
       );
       return;
@@ -1012,13 +1017,9 @@ class UrlChecker {
     required String path,
     required List<CheckFinding> findings,
   }) {
-    final String? rawContentType = resp.headers['content-type'];
+    final rawContentType = resp.headers['content-type'];
     if (rawContentType == null || rawContentType.trim().isEmpty) return;
-    final String mediaType = rawContentType
-        .split(';')
-        .first
-        .trim()
-        .toLowerCase();
+    final mediaType = rawContentType.split(';').first.trim().toLowerCase();
 
     if (path.endsWith('.wasm')) {
       if (mediaType != 'application/wasm') {
@@ -1028,7 +1029,9 @@ class UrlChecker {
             severity: Severity.fail,
             path: path,
             message:
-                'Invalid .wasm MIME type "$rawContentType". WebAssembly.instantiateStreaming requires "application/wasm".',
+                'Invalid .wasm MIME type "$rawContentType". '
+                'WebAssembly.instantiateStreaming requires '
+                '"application/wasm".',
           ),
         );
       } else {
@@ -1050,7 +1053,8 @@ class UrlChecker {
             severity: Severity.fail,
             path: path,
             message:
-                'Invalid JavaScript MIME type "$rawContentType" for $path. Must be "text/javascript" or "application/javascript".',
+                'Invalid JavaScript MIME type "$rawContentType" for $path. '
+                'Must be "text/javascript" or "application/javascript".',
           ),
         );
       } else {
@@ -1074,16 +1078,16 @@ class UrlChecker {
 
   static bool _isLocalSuperstatic404(Uri baseUri, http.Response resp) {
     if (!_isLocalhost(baseUri)) return false;
-    final String csp = resp.headers['content-security-policy'] ?? '';
-    final String etag = resp.headers['etag'] ?? '';
+    final csp = resp.headers['content-security-policy'] ?? '';
+    final etag = resp.headers['etag'] ?? '';
     return csp.contains("default-src 'none'") ||
         (etag.isNotEmpty && !etag.startsWith('"'));
   }
 
   static bool _isLocalSuperstaticUncompressed(http.Response resp) {
-    final Uri? reqUrl = resp.request?.url;
+    final reqUrl = resp.request?.url;
     if (reqUrl == null || !_isLocalhost(reqUrl)) return false;
-    final String etag = resp.headers['etag'] ?? '';
+    final etag = resp.headers['etag'] ?? '';
     return etag.isNotEmpty && !etag.startsWith('"');
   }
 
@@ -1092,16 +1096,15 @@ class UrlChecker {
     required String path,
     required List<CheckFinding> findings,
   }) {
-    final int headerLength =
+    final headerLength =
         int.tryParse(resp.headers['content-length'] ?? '') ?? 0;
-    final int contentLength = headerLength > resp.bodyBytes.length
+    final contentLength = headerLength > resp.bodyBytes.length
         ? headerLength
         : resp.bodyBytes.length;
     if (contentLength <= minCompressionBytes) return;
 
-    final String encoding = (resp.headers['content-encoding'] ?? '')
-        .toLowerCase();
-    final bool isCompressed =
+    final encoding = (resp.headers['content-encoding'] ?? '').toLowerCase();
+    final isCompressed =
         encoding.contains('br') ||
         encoding.contains('gzip') ||
         encoding.contains('zstd');
@@ -1113,7 +1116,10 @@ class UrlChecker {
             ruleId: 'C-01',
             severity: Severity.ok,
             path: path,
-            message: 'Local Firebase superstatic emulator serves uncompressed payloads locally (production Firebase Hosting CDN compresses at edge).',
+            message:
+                'Local Firebase superstatic emulator serves uncompressed '
+                'payloads locally (production Firebase Hosting CDN compresses '
+                'at edge).',
           ),
         );
         return;
@@ -1124,13 +1130,14 @@ class UrlChecker {
           severity: Severity.warn,
           path: path,
           message:
-              'Payload ($contentLength bytes) is served without Content-Encoding (br/gzip).',
+              'Payload ($contentLength bytes) is served without '
+              'Content-Encoding (br/gzip).',
         ),
       );
       return;
     }
 
-    final String vary = (resp.headers['vary'] ?? '').toLowerCase();
+    final vary = (resp.headers['vary'] ?? '').toLowerCase();
     if (!vary.contains('accept-encoding') && !vary.contains('*')) {
       findings.add(
         CheckFinding(
@@ -1138,7 +1145,9 @@ class UrlChecker {
           severity: Severity.warn,
           path: path,
           message:
-              'Compressed payload ($encoding) is missing "Vary: Accept-Encoding". Shared caches may serve mismatched encodings.',
+              'Compressed payload ($encoding) is missing '
+              '"Vary: Accept-Encoding". Shared caches may serve mismatched '
+              'encodings.',
         ),
       );
     } else {
@@ -1160,9 +1169,9 @@ class UrlChecker {
     required HostPlatform detectedPlatform,
     required List<CheckFinding> findings,
   }) {
-    final String? rawCc = resp.headers['cache-control'];
-    final CacheDirectives cc = CacheDirectives.parse(rawCc);
-    final int effectiveMaxAge = cc.sMaxAge ?? cc.maxAge ?? 0;
+    final rawCc = resp.headers['cache-control'];
+    final cc = CacheDirectives.parse(rawCc);
+    final effectiveMaxAge = cc.sMaxAge ?? cc.maxAge ?? 0;
 
     if (!cc.noCache && !cc.noStore && (cc.immutable || effectiveMaxAge > 60)) {
       if (_isLocalSuperstatic404(baseUri, resp)) {
@@ -1172,13 +1181,17 @@ class UrlChecker {
             severity: Severity.ok,
             path: path,
             message:
-                'Local Firebase superstatic emulator applies request-path Cache-Control ("$rawCc") to 404s (production Firebase Hosting stages.go applies /404.html max-age=0, must-revalidate first).',
+                'Local Firebase superstatic emulator applies request-path '
+                'Cache-Control ("$rawCc") to 404s (production Firebase '
+                'Hosting stages.go applies /404.html max-age=0, '
+                'must-revalidate first).',
           ),
         );
         return;
       }
-      final String fbPrescription = detectedPlatform == HostPlatform.firebase
-          ? ' On Firebase Hosting, add a {"source": "404.html"} rule with "max-age=0, must-revalidate".'
+      final fbPrescription = detectedPlatform == HostPlatform.firebase
+          ? ' On Firebase Hosting, add a {"source": "404.html"} rule with '
+                '"max-age=0, must-revalidate".'
           : '';
       findings.add(
         CheckFinding(
@@ -1186,7 +1199,8 @@ class UrlChecker {
           severity: Severity.fail,
           path: path,
           message:
-              '404 response for hashed path carries aggressive Cache-Control: "$rawCc" (TTL=${effectiveMaxAge}s).$fbPrescription',
+              '404 response for hashed path carries aggressive Cache-Control: '
+              '"$rawCc" (TTL=${effectiveMaxAge}s).$fbPrescription',
         ),
       );
     } else if (!cc.noCache &&
@@ -1217,15 +1231,15 @@ class UrlChecker {
       rawPath.replaceFirst(RegExp(r'^(\./|/)+'), '');
 
   static List<_AssetTarget> _extractTargets(String bootstrapBody) {
-    final String stripped = _stripJsComments(bootstrapBody);
-    final List<_AssetTarget> targets = <_AssetTarget>[];
-    final Set<String> seenPaths = <String>{};
-    final RegExp entryReg = RegExp(
+    final stripped = _stripJsComments(bootstrapBody);
+    final targets = <_AssetTarget>[];
+    final seenPaths = <String>{};
+    final entryReg = RegExp(
       r'"(mainJsPath|mainWasmPath|jsSupportRuntimePath)"\s*:\s*"([^"]+)"',
     );
     for (final Match match in entryReg.allMatches(stripped)) {
-      final String label = match.group(1)!;
-      final String cleanPath = _normalizeRelativePath(match.group(2)!.trim());
+      final label = match.group(1)!;
+      final cleanPath = _normalizeRelativePath(match.group(2)!.trim());
       if (cleanPath.isEmpty || !seenPaths.add(cleanPath)) continue;
       targets.add(
         _AssetTarget(
@@ -1237,14 +1251,14 @@ class UrlChecker {
       );
     }
 
-    final RegExp manifestReg = RegExp(
+    final manifestReg = RegExp(
       r'"(assetManifest|fontManifest)"\s*:\s*"([^"]+)"',
     );
     for (final Match match in manifestReg.allMatches(stripped)) {
-      final String label = match.group(1)!;
-      final String cleanPath = _normalizeRelativePath(match.group(2)!.trim());
+      final label = match.group(1)!;
+      final cleanPath = _normalizeRelativePath(match.group(2)!.trim());
       if (cleanPath.isEmpty) continue;
-      final String resolvedPath = cleanPath.startsWith('assets/')
+      final resolvedPath = cleanPath.startsWith('assets/')
           ? cleanPath
           : 'assets/$cleanPath';
       if (!seenPaths.add(resolvedPath)) continue;

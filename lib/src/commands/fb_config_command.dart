@@ -9,33 +9,39 @@ class FbConfigCommand extends Command<void> {
   final String name = 'fb-config';
   @override
   final String description =
-      'Inject or audit Firebase Hosting caching header rules and predeploy build scripts.';
+      'Inject or audit Firebase Hosting caching header rules and predeploy '
+      'build scripts.';
 
   FbConfigCommand() {
-    argParser.addOption(
-      'file',
-      abbr: 'f',
-      defaultsTo: 'firebase.json',
-      help: 'Path to firebase.json.',
-    );
-    argParser.addFlag(
-      'add-predeploy',
-      abbr: 'p',
-      defaultsTo: true,
-      help: 'Add or update "flutter build web --wasm --web-content-hash" in hosting.predeploy.',
-    );
-    argParser.addFlag(
-      'wasm',
-      defaultsTo: true,
-      help: 'Include --wasm in the generated/updated flutter build web predeploy command.',
-    );
+    argParser
+      ..addOption(
+        'file',
+        abbr: 'f',
+        defaultsTo: 'firebase.json',
+        help: 'Path to firebase.json.',
+      )
+      ..addFlag(
+        'add-predeploy',
+        abbr: 'p',
+        defaultsTo: true,
+        help:
+            'Add or update "flutter build web --wasm --web-content-hash" in '
+            'hosting.predeploy.',
+      )
+      ..addFlag(
+        'wasm',
+        defaultsTo: true,
+        help:
+            'Include --wasm in the generated/updated flutter build web '
+            'predeploy command.',
+      );
   }
 
   @override
   Future<void> run() async {
-    final String filePath = argResults!['file']! as String;
-    final bool addPredeploy = argResults!['add-predeploy']! as bool;
-    final bool wasm = argResults!['wasm']! as bool;
+    final filePath = argResults!['file']! as String;
+    final addPredeploy = argResults!['add-predeploy']! as bool;
+    final wasm = argResults!['wasm']! as bool;
 
     try {
       FirebaseConfig.configure(
