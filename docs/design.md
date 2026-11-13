@@ -16,11 +16,10 @@ The tool is structured around a **two-layer architecture**:
    validation, conditional `304 Not Modified` revalidation, SPA catch-all
    rewrite poisoning probes, and `404` negative-cache TTL probes.
 2. **Layer 2 — Firebase Hosting Adapter (`HostPlatform.firebase` &
-   `fb-config`)**:
-   Auto-detects Firebase Hosting via `Vary: x-fh-requested-host`, warns when
-   `no-cache`/`no-store`/`private` triggers Fastly VCL `return(pass)` (`F-12`),
-   and configures `firebase.json` with a 5-rule `last-match-wins` header stack
-   and guarded SPA rewrites.
+   `fb-config`)**: Auto-detects Firebase Hosting via
+   `Vary: x-fh-requested-host`, warns when `no-cache`/`no-store`/`private`
+   triggers Fastly VCL `return(pass)` (`F-12`), and configures `firebase.json`
+   with a 5-rule `last-match-wins` header stack and guarded SPA rewrites.
 
 ---
 

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+// ignore: avoid_classes_with_only_static_members
 class FirebaseConfig {
   static const List<Map<String, Object>> defaultHeaders = <Map<String, Object>>[
     <String, Object>{
@@ -64,8 +65,8 @@ class FirebaseConfig {
     required bool addPredeploy,
     bool wasm = true,
   }) {
-    final File file = File(filePath);
-    final Map<String, Object?> config = _loadConfigFile(file, filePath);
+    final file = File(filePath);
+    final config = _loadConfigFile(file, filePath);
 
     applyUpdates(
       config,
@@ -74,8 +75,7 @@ class FirebaseConfig {
       wasm: wasm,
     );
 
-    final String updatedJson = const JsonEncoder.withIndent('  ')
-        .convert(config);
+    final updatedJson = const JsonEncoder.withIndent('  ').convert(config);
     file.writeAsStringSync('$updatedJson\n');
     print('✅ Successfully updated $filePath with caching rules.');
   }
@@ -99,7 +99,7 @@ class FirebaseConfig {
       print('Creating new $filePath...');
       return <String, Object?>{};
     }
-    final String content = file.readAsStringSync();
+    final content = file.readAsStringSync();
     if (content.trim().isEmpty) {
       return <String, Object?>{};
     }
@@ -120,7 +120,7 @@ class FirebaseConfig {
     required bool addPredeploy,
     required bool wasm,
   }) {
-    final Object hostingObj =
+    final hostingObj =
         config['hosting'] ??
         (config['hosting'] = <String, Object?>{'public': 'build/web'});
 
@@ -129,8 +129,7 @@ class FirebaseConfig {
       return;
     }
     if (hostingObj is List<Object?>) {
-      for (final Map<String, Object?> item
-          in hostingObj.whereType<Map<String, Object?>>()) {
+      for (final item in hostingObj.whereType<Map<String, Object?>>()) {
         _configureHostingSection(item, addPredeploy, wasm: wasm);
       }
       return;
@@ -151,15 +150,15 @@ class FirebaseConfig {
   }
 
   static void _configureHeaders(Map<String, Object?> hosting) {
-    final List<Object?> existingHeaders =
+    final existingHeaders =
         (hosting['headers'] as List<Object?>?) ?? <Object?>[];
-    final Set<String> managedSources = <String>{
+    final managedSources = <String>{
       ..._legacySources,
       for (final Map<String, Object> rule in defaultHeaders)
         rule['source']! as String,
     };
 
-    final List<Object?> customHeaders = <Object?>[
+    final customHeaders = <Object?>[
       for (final Object? item in existingHeaders)
         if (item is! Map<String, Object?> ||
             !managedSources.contains(item['source']))
@@ -170,19 +169,18 @@ class FirebaseConfig {
   }
 
   static void _guardSpaRewrites(Map<String, Object?> hosting) {
-    final Object? rewrites = hosting['rewrites'];
+    final rewrites = hosting['rewrites'];
     if (rewrites is! List<Object?>) return;
 
-    for (final Map<String, Object?> item
-        in rewrites.whereType<Map<String, Object?>>()) {
-      final Object? source = item['source'];
-      final Object? destination = item['destination'];
-      final bool isCatchAll =
+    for (final item in rewrites.whereType<Map<String, Object?>>()) {
+      final source = item['source'];
+      final destination = item['destination'];
+      final isCatchAll =
           source == '**' ||
           source == '**/*' ||
           source == '!/@(assets|canvaskit|icons|main.dart.*)/**' ||
           source == '!/@(assets|canvaskit)/**';
-      final bool isIndexDest =
+      final isIndexDest =
           destination == '/index.html' || destination == 'index.html';
       if (isCatchAll && isIndexDest) {
         item['source'] = guardedSpaRewriteSource;
@@ -194,10 +192,10 @@ class FirebaseConfig {
     Map<String, Object?> hosting, {
     required bool wasm,
   }) {
-    final String targetCommand = wasm
+    final targetCommand = wasm
         ? 'flutter build web --wasm --web-content-hash'
         : 'flutter build web --web-content-hash';
-    final Object? predeploy = hosting['predeploy'];
+    final predeploy = hosting['predeploy'];
 
     if (predeploy == null) {
       hosting['predeploy'] = <String>[targetCommand];
@@ -210,10 +208,10 @@ class FirebaseConfig {
   }
 
   static String _upgradeFlutterBuildCmd(String cmd, {required bool wasm}) {
-    final RegExp segmentReg = RegExp(r'flutter\s+build\s+web([^;&|]*)');
+    final segmentReg = RegExp(r'flutter\s+build\s+web([^;&|]*)');
     return cmd.replaceFirstMapped(segmentReg, (Match m) {
-      String segment = m.group(0)!;
-      final bool hadTrailingSpace = segment.endsWith(' ');
+      var segment = m.group(0)!;
+      final hadTrailingSpace = segment.endsWith(' ');
       segment = segment.trimRight();
       if (wasm) {
         segment = segment.replaceAll(RegExp(r'\s+--no-wasm\b'), '');
@@ -240,7 +238,7 @@ class FirebaseConfig {
       print('Added "$targetCommand" to predeploy array.');
       return;
     }
-    final String upgraded = _upgradeFlutterBuildCmd(predeploy, wasm: wasm);
+    final upgraded = _upgradeFlutterBuildCmd(predeploy, wasm: wasm);
     if (upgraded != predeploy) {
       hosting['predeploy'] = upgraded;
       print('Updated predeploy string to "$upgraded".');
@@ -252,12 +250,12 @@ class FirebaseConfig {
     String targetCommand, {
     required bool wasm,
   }) {
-    bool foundFlutterBuild = false;
-    for (int i = 0; i < predeploy.length; i++) {
-      final Object? cmd = predeploy[i];
+    var foundFlutterBuild = false;
+    for (var i = 0; i < predeploy.length; i++) {
+      final cmd = predeploy[i];
       if (cmd is String && cmd.contains('flutter build web')) {
         foundFlutterBuild = true;
-        final String upgraded = _upgradeFlutterBuildCmd(cmd, wasm: wasm);
+        final upgraded = _upgradeFlutterBuildCmd(cmd, wasm: wasm);
         if (upgraded != cmd) {
           predeploy[i] = upgraded;
           print('Updated predeploy command to "$upgraded".');

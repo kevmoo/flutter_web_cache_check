@@ -7,10 +7,11 @@ import 'package:stack_trace/stack_trace.dart';
 void main(List<String> args) {
   Chain.capture(
     () async {
-      final CommandRunner<void> runner =
+      final runner =
           CommandRunner<void>(
               'flutter_web_cache_check',
-              'CLI tool to configure and verify caching headers for Flutter web apps.',
+              'CLI tool to configure and verify caching headers for Flutter '
+                  'web apps.',
             )
             ..addCommand(FbConfigCommand())
             ..addCommand(CheckCommand());
@@ -26,12 +27,14 @@ void main(List<String> args) {
     },
     onError: (Object error, Chain chain) {
       if (error is UsageException) {
-        stderr.writeln(error.message);
-        stderr.writeln(error.usage);
+        stderr
+          ..writeln(error.message)
+          ..writeln(error.usage);
         exit(64);
       } else {
-        stderr.writeln('Fatal error: $error');
-        stderr.writeln(chain.terse);
+        stderr
+          ..writeln('Fatal error: $error')
+          ..writeln(chain.terse);
         exit(1);
       }
     },

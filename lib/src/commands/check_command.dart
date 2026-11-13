@@ -27,29 +27,33 @@ class CheckCommand extends Command<void> {
       ..addFlag(
         'wasm',
         defaultsTo: true,
-        help: 'Require a WebAssembly (dart2wasm) build target in flutter_bootstrap.js.',
+        help:
+            'Require a WebAssembly (dart2wasm) build target in '
+            'flutter_bootstrap.js.',
       );
   }
 
   @override
   Future<void> run() async {
-    String? targetUrl = argResults!['url'] as String?;
+    var targetUrl = argResults!['url'] as String?;
     if (targetUrl == null && argResults!.rest.isNotEmpty) {
       targetUrl = argResults!.rest.first;
     }
 
     if (targetUrl == null || targetUrl.isEmpty) {
-      stderr.writeln(
-        'Error: Please specify a target URL via --url or positional argument.',
-      );
-      stderr.writeln(usage);
+      stderr
+        ..writeln(
+          'Error: Please specify a target URL via --url or positional '
+          'argument.',
+        )
+        ..writeln(usage);
       exit(64);
     }
 
-    final bool verbose = globalResults?['verbose'] as bool? ?? false;
-    final String platformName = argResults!['platform'] as String? ?? 'auto';
-    final bool requireWasm = argResults!['wasm'] as bool? ?? true;
-    final HostPlatform platform = switch (platformName) {
+    final verbose = globalResults?['verbose'] as bool? ?? false;
+    final platformName = argResults!['platform'] as String? ?? 'auto';
+    final requireWasm = argResults!['wasm'] as bool? ?? true;
+    final platform = switch (platformName) {
       'firebase' => HostPlatform.firebase,
       'generic' => HostPlatform.generic,
       _ => HostPlatform.auto,

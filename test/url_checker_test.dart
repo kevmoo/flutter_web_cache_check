@@ -28,7 +28,7 @@ http.Response _handleBootstrapRequest(
   required String mjsCacheControl,
   required String mjsContentType,
 }) {
-  final String path = request.url.path;
+  final path = request.url.path;
   if (path == '/index.html' || path == '/') {
     return http.Response(
       '<html></html>',
@@ -115,7 +115,13 @@ http.Client _buildWasmProbeClient({
   }
   return _handleBootstrapRequest(
     request,
-    bootstrapBody: '_flutter.buildConfig = {"builds":[{"compileTarget":"dart2wasm","mainWasmPath":"main.dart.5f77f974.wasm","jsSupportRuntimePath":"main.dart.db41cfdb.mjs"},{"compileTarget":"dart2js","mainJsPath":"main.dart.785ea741.js"}]};',
+    bootstrapBody:
+        '_flutter.buildConfig = {"builds": [ '
+        '{"compileTarget": "dart2wasm", '
+        '"mainWasmPath": "main.dart.5f77f974.wasm", '
+        '"jsSupportRuntimePath": "main.dart.db41cfdb.mjs"}, '
+        '{"compileTarget": "dart2js", '
+        '"mainJsPath": "main.dart.785ea741.js"}]};',
     wasmCacheControl: 'public, max-age=31536000, immutable',
     wasmContentType: 'application/wasm',
     mjsCacheControl: 'public, max-age=31536000, immutable',
@@ -126,10 +132,13 @@ http.Client _buildWasmProbeClient({
 MockClient _buildSuperstaticClient() => MockClient(_handleSuperstaticRequest);
 
 Future<http.Response> _handleSuperstaticRequest(http.Request request) async {
-  final String path = request.url.path;
+  final path = request.url.path;
   if (path == '/index.html' || path == '/flutter_bootstrap.js') {
-    final String body = path == '/flutter_bootstrap.js'
-        ? '_flutter.buildConfig = {"builds":[{"compileTarget":"dart2wasm","mainWasmPath":"main.dart.5f77f974.wasm","jsSupportRuntimePath":"main.dart.db41cfdb.mjs"}]};'
+    final body = path == '/flutter_bootstrap.js'
+        ? '_flutter.buildConfig = {"builds": [ '
+              '{"compileTarget": "dart2wasm", '
+              '"mainWasmPath": "main.dart.5f77f974.wasm", '
+              '"jsSupportRuntimePath": "main.dart.db41cfdb.mjs"}]};'
         : '<html></html>';
     return http.Response(
       body,
@@ -191,31 +200,44 @@ void main() {
 
 void _registerW01Tests() {
   group('W-01: First-Class WebAssembly (dart2wasm) Target Detection', () {
-    test('emits W-01 Severity.warn when flutter_bootstrap.js only has mainJsPath and requireWasm is true', () async {
-      final CheckReport report = await UrlChecker(
+    test(
+      'emits W-01 Severity.warn when flutter_bootstrap.js only has mainJsPath '
+      'and requireWasm is true',
+      () async {
+        final report = await UrlChecker(
+          'https://example.com',
+          client: _buildBootstrapClient(
+            bootstrapBody:
+                '_flutter.buildConfig = {"builds": [ '
+                '{"compileTarget": "dart2js", '
+                '"mainJsPath": "main.dart.785ea741.js"}]};',
+          ),
+          minCompressionBytes: 100000,
+        ).analyze();
+
+        expect(
+          report.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'W-01' &&
+                f.severity == Severity.warn &&
+                f.message.contains(
+                  'flutter build web --wasm --web-content-hash',
+                ),
+          ),
+          isTrue,
+        );
+      },
+    );
+
+    test('emits W-01 Severity.ok when flutter_bootstrap.js only has mainJsPath '
+        'and requireWasm is false', () async {
+      final report = await UrlChecker(
         'https://example.com',
         client: _buildBootstrapClient(
-          bootstrapBody: '_flutter.buildConfig = {"builds":[{"compileTarget":"dart2js","mainJsPath":"main.dart.785ea741.js"}]};',
-        ),
-        minCompressionBytes: 100000,
-      ).analyze();
-
-      expect(
-        report.findings.any(
-          (CheckFinding f) =>
-              f.ruleId == 'W-01' &&
-              f.severity == Severity.warn &&
-              f.message.contains('flutter build web --wasm --web-content-hash'),
-        ),
-        isTrue,
-      );
-    });
-
-    test('emits W-01 Severity.ok when flutter_bootstrap.js only has mainJsPath and requireWasm is false', () async {
-      final CheckReport report = await UrlChecker(
-        'https://example.com',
-        client: _buildBootstrapClient(
-          bootstrapBody: '_flutter.buildConfig = {"builds":[{"compileTarget":"dart2js","mainJsPath":"main.dart.785ea741.js"}]};',
+          bootstrapBody:
+              '_flutter.buildConfig = {"builds": [ '
+              '{"compileTarget": "dart2js", '
+              '"mainJsPath": "main.dart.785ea741.js"}]};',
         ),
         requireWasm: false,
         minCompressionBytes: 100000,
@@ -233,11 +255,20 @@ void _registerW01Tests() {
       );
     });
 
-    test('emits W-01 Severity.ok and validates .wasm (F-03, M-01) and .mjs (F-03, M-02) when mainWasmPath is present', () async {
-      final CheckReport report = await UrlChecker(
+    test('emits W-01 Severity.ok and validates .wasm (F-03, M-01) and .mjs '
+        '(F-03, M-02) when mainWasmPath is present', () async {
+      final report = await UrlChecker(
         'https://example.com',
         client: _buildBootstrapClient(
-          bootstrapBody: '_flutter.buildConfig = {"builds":[{"compileTarget":"dart2wasm","mainWasmPath":"main.dart.5f77f974.wasm","jsSupportRuntimePath":"main.dart.db41cfdb.mjs"},{"compileTarget":"dart2js","mainJsPath":"main.dart.785ea741.js"}],"assetManifest":"AssetManifest.bin.10579154.json","fontManifest":"FontManifest.e5f60718.json"};',
+          bootstrapBody:
+              '_flutter.buildConfig = {"builds": [ '
+              '{"compileTarget": "dart2wasm", '
+              '"mainWasmPath": "main.dart.5f77f974.wasm", '
+              '"jsSupportRuntimePath": "main.dart.db41cfdb.mjs"}, '
+              '{"compileTarget": "dart2js", '
+              '"mainJsPath": "main.dart.785ea741.js"}], '
+              '"assetManifest": "AssetManifest.bin.10579154.json", '
+              '"fontManifest": "FontManifest.e5f60718.json"};',
         ),
         minCompressionBytes: 100000,
       ).analyze();
@@ -273,11 +304,16 @@ void _registerW01Tests() {
       );
     });
 
-    test('emits W-01 Severity.warn when mainWasmPath is empty/whitespace or dart2wasm is only in JS comments', () async {
-      final CheckReport emptyPathReport = await UrlChecker(
+    test('emits W-01 Severity.warn when mainWasmPath is empty/whitespace or '
+        'dart2wasm is only in JS comments', () async {
+      final emptyPathReport = await UrlChecker(
         'https://example.com',
         client: _buildBootstrapClient(
-          bootstrapBody: '_flutter.buildConfig = {"builds":[{"compileTarget":"dart2wasm","mainWasmPath":"   "},{"compileTarget":"dart2js","mainJsPath":"main.dart.785ea741.js"}]};',
+          bootstrapBody:
+              '_flutter.buildConfig = {"builds": [ '
+              '{"compileTarget": "dart2wasm", "mainWasmPath": "   "}, '
+              '{"compileTarget": "dart2js", '
+              '"mainJsPath": "main.dart.785ea741.js"}]};',
         ),
         minCompressionBytes: 100000,
       ).analyze();
@@ -289,10 +325,15 @@ void _registerW01Tests() {
         isTrue,
       );
 
-      final CheckReport commentedWasmReport = await UrlChecker(
+      final commentedWasmReport = await UrlChecker(
         'https://example.com',
         client: _buildBootstrapClient(
-          bootstrapBody: '// {"compileTarget":"dart2wasm","mainWasmPath":"main.dart.5f77f974.wasm"}\n_flutter.buildConfig = {"builds":[{"compileTarget":"dart2js","mainJsPath":"main.dart.785ea741.js"}]};',
+          bootstrapBody:
+              '// {"compileTarget": "dart2wasm", '
+              '"mainWasmPath": "main.dart.5f77f974.wasm"}\n'
+              '_flutter.buildConfig = {"builds": [ '
+              '{"compileTarget": "dart2js", '
+              '"mainJsPath": "main.dart.785ea741.js"}]};',
         ),
         minCompressionBytes: 100000,
       ).analyze();
@@ -311,55 +352,64 @@ void _registerW02Tests() {
   group(
     'W-02: Synthetic Missing .wasm SPA Fallback & 404 Negative-Cache Probe',
     () {
-      test('fails with F-05 Severity.error when /main.dart.00000000.wasm returns 200 text/html even if .js returns 404', () async {
-        final CheckReport report = await UrlChecker(
-          'https://example.com',
-          client: _buildWasmProbeClient(
-            wasmStatus: 200,
-            wasmContentType: 'text/html; charset=utf-8',
-            wasmCacheControl: 'public, max-age=31536000, immutable',
-            wasmBody: '<!DOCTYPE html><html></html>',
-          ),
-          minCompressionBytes: 100000,
-        ).analyze();
+      test(
+        'fails with F-05 Severity.error when /main.dart.00000000.wasm returns '
+        '200 text/html even if .js returns 404',
+        () async {
+          final report = await UrlChecker(
+            'https://example.com',
+            client: _buildWasmProbeClient(
+              wasmStatus: 200,
+              wasmContentType: 'text/html; charset=utf-8',
+              wasmCacheControl: 'public, max-age=31536000, immutable',
+              wasmBody: '<!DOCTYPE html><html></html>',
+            ),
+            minCompressionBytes: 100000,
+          ).analyze();
 
-        expect(
-          report.findings.any(
-            (CheckFinding f) =>
-                f.ruleId == 'F-05' &&
-                f.path == 'main.dart.00000000.wasm' &&
-                f.severity == Severity.error &&
-                f.message.contains('0x3c21444f') &&
-                f.message.contains('WebAssembly.compileStreaming'),
-          ),
-          isTrue,
-        );
-      });
+          expect(
+            report.findings.any(
+              (CheckFinding f) =>
+                  f.ruleId == 'F-05' &&
+                  f.path == 'main.dart.00000000.wasm' &&
+                  f.severity == Severity.error &&
+                  f.message.contains('0x3c21444f') &&
+                  f.message.contains('WebAssembly.compileStreaming'),
+            ),
+            isTrue,
+          );
+        },
+      );
 
-      test('fails with F-06 Severity.error when /main.dart.00000000.wasm returns 404 with immutable', () async {
-        final CheckReport report = await UrlChecker(
-          'https://example.com',
-          client: _buildWasmProbeClient(
-            wasmStatus: 404,
-            wasmContentType: 'text/plain',
-            wasmCacheControl: 'public, max-age=31536000, immutable',
-          ),
-          minCompressionBytes: 100000,
-        ).analyze();
+      test(
+        'fails with F-06 Severity.error when /main.dart.00000000.wasm returns '
+        '404 with immutable',
+        () async {
+          final report = await UrlChecker(
+            'https://example.com',
+            client: _buildWasmProbeClient(
+              wasmStatus: 404,
+              wasmContentType: 'text/plain',
+              wasmCacheControl: 'public, max-age=31536000, immutable',
+            ),
+            minCompressionBytes: 100000,
+          ).analyze();
 
-        expect(
-          report.findings.any(
-            (CheckFinding f) =>
-                f.ruleId == 'F-06' &&
-                f.path == 'main.dart.00000000.wasm' &&
-                f.severity == Severity.error,
-          ),
-          isTrue,
-        );
-      });
+          expect(
+            report.findings.any(
+              (CheckFinding f) =>
+                  f.ruleId == 'F-06' &&
+                  f.path == 'main.dart.00000000.wasm' &&
+                  f.severity == Severity.error,
+            ),
+            isTrue,
+          );
+        },
+      );
 
-      test('emits F-05 Severity.ok when /main.dart.00000000.wasm returns 404 with no-store', () async {
-        final CheckReport report = await UrlChecker(
+      test('emits F-05 Severity.ok when /main.dart.00000000.wasm returns 404 '
+          'with no-store', () async {
+        final report = await UrlChecker(
           'https://example.com',
           client: _buildWasmProbeClient(
             wasmStatus: 404,
@@ -388,12 +438,12 @@ void _registerE02Tests() {
     test(
       'recognizes superstatic on 127.0.0.1/localhost/[::1] for F-06 and C-01',
       () async {
-        for (final String url in <String>[
+        for (final url in <String>[
           'http://127.0.0.1:5000',
           'http://localhost:5000',
           'http://[::1]:5000',
         ]) {
-          final CheckReport report = await UrlChecker(
+          final report = await UrlChecker(
             url,
             client: _buildSuperstaticClient(),
           ).analyze();
@@ -425,7 +475,7 @@ void _registerE02Tests() {
     test(
       'still flags F-06 fail and C-01 warn on non-localhost domain',
       () async {
-        final CheckReport report = await UrlChecker(
+        final report = await UrlChecker(
           'https://example.web.app',
           client: _buildSuperstaticClient(),
         ).analyze();
@@ -467,7 +517,13 @@ http.Client _buildPrecacheManifestClient({
   }
   return _handleBootstrapRequest(
     request,
-    bootstrapBody: '_flutter.buildConfig = {"builds":[{"compileTarget":"dart2wasm","mainWasmPath":"main.dart.5f77f974.wasm","jsSupportRuntimePath":"main.dart.db41cfdb.mjs"},{"compileTarget":"dart2js","mainJsPath":"main.dart.785ea741.js"}]};',
+    bootstrapBody:
+        '_flutter.buildConfig = {"builds": [ '
+        '{"compileTarget": "dart2wasm", '
+        '"mainWasmPath": "main.dart.5f77f974.wasm", '
+        '"jsSupportRuntimePath": "main.dart.db41cfdb.mjs"}, '
+        '{"compileTarget": "dart2js", '
+        '"mainJsPath": "main.dart.785ea741.js"}]};',
     wasmCacheControl: 'public, max-age=31536000, immutable',
     wasmContentType: 'application/wasm',
     mjsCacheControl: 'public, max-age=31536000, immutable',
@@ -477,8 +533,9 @@ http.Client _buildPrecacheManifestClient({
 
 void _registerF08Tests() {
   group('F-07 & F-08: precache_manifest.json validation', () {
-    test('passes F-07 and F-08 when precache_manifest.json revalidates and all hashed entries match', () async {
-      const String validManifest = '''
+    test('passes F-07 and F-08 when precache_manifest.json revalidates and all '
+        'hashed entries match', () async {
+      const validManifest = '''
 {
   "version": 1,
   "entries": [
@@ -490,7 +547,7 @@ void _registerF08Tests() {
   ]
 }
 ''';
-      final CheckReport report = await UrlChecker(
+      final report = await UrlChecker(
         'https://example.com',
         client: _buildPrecacheManifestClient(manifestBody: validManifest),
         minCompressionBytes: 100000,
@@ -517,8 +574,9 @@ void _registerF08Tests() {
       );
     });
 
-    test('fails F-08 when --source-maps mutates JS after hashing (urlHashed: false on hashed filename)', () async {
-      const String brokenSourceMapManifest = '''
+    test('fails F-08 when --source-maps mutates JS after hashing '
+        '(urlHashed: false on hashed filename)', () async {
+      const brokenSourceMapManifest = '''
 {
   "version": 1,
   "entries": [
@@ -528,7 +586,7 @@ void _registerF08Tests() {
   ]
 }
 ''';
-      final CheckReport report = await UrlChecker(
+      final report = await UrlChecker(
         'https://example.com',
         client: _buildPrecacheManifestClient(
           manifestBody: brokenSourceMapManifest,
@@ -549,8 +607,11 @@ void _registerF08Tests() {
       );
     });
 
-    test('fails F-07 when precache_manifest.json is cached with max-age > 0 and F-08 when .map is included or entrypoint is missing', () async {
-      const String badManifest = '''
+    test(
+      'fails F-07 when precache_manifest.json is cached with max-age > 0 and '
+      'F-08 when .map is included or entrypoint is missing',
+      () async {
+        const badManifest = '''
 {
   "version": 1,
   "entries": [
@@ -559,35 +620,36 @@ void _registerF08Tests() {
   ]
 }
 ''';
-      final CheckReport report = await UrlChecker(
-        'https://example.com',
-        client: _buildPrecacheManifestClient(
-          manifestBody: badManifest,
-          manifestCacheControl: 'public, max-age=3600',
-        ),
-        minCompressionBytes: 100000,
-      ).analyze();
+        final report = await UrlChecker(
+          'https://example.com',
+          client: _buildPrecacheManifestClient(
+            manifestBody: badManifest,
+            manifestCacheControl: 'public, max-age=3600',
+          ),
+          minCompressionBytes: 100000,
+        ).analyze();
 
-      expect(
-        report.findings.any(
-          (CheckFinding f) =>
-              f.ruleId == 'F-07' &&
-              f.path == 'precache_manifest.json' &&
-              f.severity == Severity.fail,
-        ),
-        isTrue,
-      );
-      expect(
-        report.findings.any(
-          (CheckFinding f) =>
-              f.ruleId == 'F-08' &&
-              f.path == 'precache_manifest.json' &&
-              f.severity == Severity.fail &&
-              f.message.contains('main.dart.785ea741.js.map') &&
-              f.message.contains('main.dart.db41cfdb.mjs missing'),
-        ),
-        isTrue,
-      );
-    });
+        expect(
+          report.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'F-07' &&
+                f.path == 'precache_manifest.json' &&
+                f.severity == Severity.fail,
+          ),
+          isTrue,
+        );
+        expect(
+          report.findings.any(
+            (CheckFinding f) =>
+                f.ruleId == 'F-08' &&
+                f.path == 'precache_manifest.json' &&
+                f.severity == Severity.fail &&
+                f.message.contains('main.dart.785ea741.js.map') &&
+                f.message.contains('main.dart.db41cfdb.mjs missing'),
+          ),
+          isTrue,
+        );
+      },
+    );
   });
 }
