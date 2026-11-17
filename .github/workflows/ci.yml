@@ -102,3 +102,9 @@ jobs:
             dart tool/redteam_harness/bin/redteam.dart --only S15 --backend sim --out /tmp/redteam_s15_sim_ci
           REDTEAM_FLUTTER_MASTER="$(dirname "$(dirname "$(which flutter)")")" \
             dart tool/redteam_harness/bin/redteam.dart --only S15 --backend firebase-emulator --out /tmp/redteam_s15_emul_ci
+      - name: Run redteam_harness S16 flag-toggle dogfood (JS + WASM, sim & firebase-emulator)
+        run: |
+          REDTEAM_FLUTTER_MASTER="$(dirname "$(dirname "$(which flutter)")")" \
+            dart tool/redteam_harness/bin/redteam.dart --only S16 --backend sim --out /tmp/redteam_s16_sim_ci
+          REDTEAM_FLUTTER_MASTER="$(dirname "$(dirname "$(which flutter)")")" \
+            dart tool/redteam_harness/bin/redteam.dart --only S16 --backend firebase-emulator --out /tmp/redteam_s16_emul_ci
