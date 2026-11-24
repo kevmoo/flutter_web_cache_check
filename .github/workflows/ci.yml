@@ -81,6 +81,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # TODO(kevmoo): Remove flutter_head and custom cache-key once
+      # https://github.com/subosito/flutter-action/pull/407 ships in v2.
       - id: flutter_head
         name: Resolve Flutter master HEAD
         run: echo "sha=$(git -C /tmp ls-remote https://github.com/flutter/flutter.git refs/heads/master | cut -f1)" >> "$GITHUB_OUTPUT"
